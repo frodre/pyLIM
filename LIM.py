@@ -12,16 +12,20 @@ monthly mean format.
 import numpy as np
 from scipy.io import netcdf as ncf
 from scipy.signal import convolve
+from scipy.sparse.linalg import eigs
 import Stats as st
 import matplotlib.pyplot as plt
 from time import time
+from random import sample
 
 plt.close('all')
-
+mem_save = True
 #data_file = '/home/melt/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
 data_file = '/home/melt/wperkins/data/20CR/air.2m.mon.mean.nc'
 wsize = 12
 var_name = 'air'
+neigs = 20
+num_trials = 1
 
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
@@ -49,13 +53,64 @@ mon_climo = np.sum(shp_run_mean, axis=0)/float(new_shp[0])
 print "Done!"
 
 anomaly_srs = (shp_run_mean - mon_climo).reshape(([new_shp[0]*wsize] + new_shp[2:]))
-x = range(len(anomaly_srs))
 
-fig, ax = plt.subplots(2,1)
-ax[0].plot(x, anomaly_srs[:,30,30])
-ax[1].plot(x, run_mean[:,30,30])
-fig.show()
+if mem_save:
+    run_mean = shp_run_mean = mon_climo = None
 
-neigs = 20
+#x = range(len(anomaly_srs))
+#fig, ax = plt.subplots(2,1)
+#ax[0].plot(x, anomaly_srs[:,30,30])
+#ax[1].plot(x, run_mean[:,30,30])
+#fig.show()
 
+#Reshape data for covariance
+shp = anomaly_srs.shape
+shp_anomaly = anomaly_srs.reshape(shp[0], shp[1]*shp[2])
+print "\nCalculating EOFs..."
+t1 = time()
+eofs, eig_vals, var_pct = st.calcEOF(shp_anomaly.T, neigs)
+dur = time() - t1
+print "Done! (Completed in %.1f s)" % dur
+eof_proj = np.dot(eofs.T, shp_anomaly.T)
+
+print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
+
+#Start running trials for LIM forecasts
+for i in range(num_trials):
+    print """
+=========
+Trial %i
+=========
+    """ % i
+    #randomize sample of indices for training and testing
+    tlimit = 12*12
+    time_dim = eof_proj.shape[1] - tlimit
+    tsample = int(time_dim*0.9)
+    rnd_idx = sample(xrange(time_dim), time_dim)
+
+    for tau in range(tlimit):
+        train_idx = np.array(rnd_idx[0:tsample])
+        x0 = eof_proj[:,train_idx]
+        xt = eof_proj[:,(train_idx + tau)]
+        xtx0 = np.dot(xt,x0.T) 
+        x0x0 = np.dot(x0, x0.T)
+        M = np.dot(xtx0, np.linalg.pinv(x0x0))
+
+        #Test on training data
+        xf = np.dot(M, x0)
+        err = xf - xt
+        if (tau + 1) % 12 == 0:
+            print 'Mean training set error: %f' % abs(err).mean()
+
+        #Test on independent data
+        indep_idx = np.array(rnd_idx[(tsample+1):])
+        x0i = eof_proj[:,indep_idx]
+        xti = eof_proj[:,(indep_idx + tau)]
+        xfi = np.dot(M, x0i)
+        erri = xfi - xti
+
+        if (tau + 1) % 12 == 0:
+            print 'Mean training set error: %f' % abs(err).mean()
+            print 'Mean testing set error: %f' % abs(erri).mean()
+         
 f.close()

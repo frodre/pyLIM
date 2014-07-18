@@ -8,6 +8,7 @@ import scipy.io.netcdf as ncf
 from subprocess import call, Popen
 from multiprocessing import Pool
 from os.path import exists, join, splitext
+from scipy.sparse.linalg import eigs
 
 def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
     """
@@ -65,7 +66,8 @@ def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
     #  memory).  For now I suggest using this method.
     if useNCO:
         inFile = nc_file.filename
-        inFile_no_ext,file_ext = splitext(inFile)
+        inFile_no_ext, file_ext = splitext(inFile)
+        file_ext = file_ext.strip('.')
         pad_len = len(str(new_shape[0])) #calculate padding for tmp file numbers
         fmt_str = '%s0%ii' % ('%', pad_len)
         wildcard = '?'*pad_len
@@ -102,21 +104,7 @@ def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
              if (i % (10**(pad_len-2)) == 0):
                  print 'Processed %i of %i' % (i, new_shape[0])
 
-        #for idx in range(new_shape[0]):
-        #    if(idx % (10**(pad_len-2)) == 0):
-        #        print 'Calc run avg for idx %i' % idx
-        #    tmp_out = '.'.join([inFile_no_ext, fmt_str % idx, 'tmp'])
-        #    execArgs = ['ncra',
-        #                '-O',
-        #                '-d',
-        #                'time,%i,%i' % (idx, idx+window_size-1),
-        #                inFile,
-        #                tmp_out]
-        #    p = subprocess.Popen(execArgs)
-            #p.wait()
-
         if _DEBUG: print cmds[0:2]
-
         
         #Concatenate tmp files
         tmp_files = '.'.join([inFile_no_ext, wildcard, 'tmp'])
@@ -142,4 +130,44 @@ def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
         result = result/float(window_size)
     
     return (result, bot_edge, top_edge)
-    
+   
+
+def calcEOF(data, num_eigs, useSVD = True, retPCs = False):
+    """
+    Method to calculate the EOFs of given  dataset.  This assumes data comes in as
+    an m x n matrix where m is the spatial dimension and n is the sampling
+    dimension.  
+
+    Parameters
+    ----------
+    data: ndarray
+        Dataset to calculate EOFs from
+    num_eigs: int
+        Number of eigenvalues/vectors to return.  Must be less than min(m, n).
+    useSVD: bool, optional
+        Use singular value decomposition to calculate the EOFs
+    retPCs: bool, optional
+        Return principal component matrix along with EOFs
+
+    Returns
+    -------
+
+    """
+
+    if useSVD:
+        eofs, E, pcs = np.linalg.svd(data, full_matrices=False)
+        eig_vals = (E ** 2) / (len(E) - 1.)
+        tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
+
+    else:
+        cov = np.linalg.cov(data)
+        eig_vals, eofs = eigs(cov, k=num_eigs)
+        tot_var = eig_vals.real.sum()/cov.trace()
+        cov = np.linalg.cov(data.T)
+        pcs, trash = eigs(cov, k=num_eigs)
+
+    if retPCs:
+        return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var, pcs[0:num_eigs])
+    else:
+        return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
+
