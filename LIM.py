@@ -30,6 +30,7 @@ num_trials = 1
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
 tvar = f.variables[var_name]
+#account for data storage as int * scale + offset
 try:
     sf = tvar.scale_factor
     offset = tvar.add_offset
