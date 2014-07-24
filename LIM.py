@@ -17,15 +17,23 @@ import Stats as st
 import matplotlib.pyplot as plt
 from time import time
 from random import sample
+import os
 
+#Clear all previous plots
 plt.close('all')
-mem_save = True
-#data_file = '/home/melt/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
-data_file = '/home/melt/wperkins/data/20CR/air.2m.mon.mean.nc'
+
 wsize = 12
 var_name = 'air'
 neigs = 20
 num_trials = 1
+NCO = True #NetCDF Operators Flag, always false on Windows for now
+
+if os.name == 'nt':
+    data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
+    NCO = False
+else:
+    #data_file = '/home/melt/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
+    data_file = '/home/melt/wperkins/data/20CR/air.2m.mon.mean.nc'
 
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
@@ -41,7 +49,7 @@ except AttributeError:
 #Calc running mean using window size over the data
 print "\nCalculating running mean..."
 t1 = time()
-run_mean, bedge, tedge = st.runMean(f, var_name, wsize, num_procs=2, useNCO=True)
+run_mean, bedge, tedge = st.runMean(f, var_name, wsize, num_procs=2, useNCO=NCO)
 t2 = time()
 dur = t2 - t1
 print "Done! (Completed in %f s)" % dur
@@ -54,15 +62,6 @@ mon_climo = np.sum(shp_run_mean, axis=0)/float(new_shp[0])
 print "Done!"
 
 anomaly_srs = (shp_run_mean - mon_climo).reshape(([new_shp[0]*wsize] + new_shp[2:]))
-
-if mem_save:
-    run_mean = shp_run_mean = mon_climo = None
-
-#x = range(len(anomaly_srs))
-#fig, ax = plt.subplots(2,1)
-#ax[0].plot(x, anomaly_srs[:,30,30])
-#ax[1].plot(x, run_mean[:,30,30])
-#fig.show()
 
 #Reshape data for covariance
 shp = anomaly_srs.shape
