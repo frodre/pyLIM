@@ -35,7 +35,7 @@ if os.name == 'nt':
 else:
     #data_file = '/home/melt/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
     data_file = '/home/melt/wperkins/data/20CR/air.2m.mon.mean.nc'
-    
+
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
 tvar = f.variables[var_name]
