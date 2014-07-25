@@ -27,7 +27,7 @@ neigs = 30
 num_trials = 40 
 forecast_tlim = 144 #months
 NCO = True #NetCDF Operators Flag, always false on Windows for now
-detrend_data=False
+detrend_data=True 
 
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
@@ -133,9 +133,9 @@ if vs_tau:
         
     fig, ax = plt.subplots()
     ax.plot(evar)
-    ax.set_title('Variance vs. Forecast Lead Time')
+    ax.set_title('Error Variance vs. Forecast Lead Time')
     ax.set_xlabel('Lead time (months)')
-    ax.set_ylabel('Variance (K)')
+    ax.set_ylabel('Error Variance (K)')
     fig.show()
 
 if vs_trials:
