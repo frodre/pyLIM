@@ -4,13 +4,13 @@ Toolbox for statistical methods.
 """
 
 import numpy as np
-import scipy.io.netcdf as ncf
+import scipy.io.netcdf as _ncf
 from subprocess import call, Popen
 from multiprocessing import Pool
-from os.path import exists, join, splitext
+from os.path import exists, splitext
 from scipy.sparse.linalg import eigs
 
-def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
+def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False, recalc=False):
     """
     A function for calculating the running mean on data.
 
@@ -52,7 +52,7 @@ def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
         sf = nc_var.scale_factor
         offset = nc_var.add_offset
         data = nc_var.data * sf + offset
-    except AttributeError as e:
+    except AttributeError:
         data = nc_var.data
       
     dshape = data.shape
@@ -79,16 +79,11 @@ def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
             print 'file_ext: %s' % file_ext
             print 'inFile_no_ext: %s' % inFile_no_ext
 
-        #Check if running mean was already done, prompt to recalculate
-        if exists(out_file):
-            user_in = ''
-            while user_in != 'y' and user_in != 'n':
-                user_in = raw_input('Would you like to recalculate the running' 
-                                     ' mean?[y or n]: ').rstrip()
-            if user_in == 'n':
-                f = ncf.netcdf_file(out_file, 'r')
-                result = f.variables[nc_varname].data
-                return (result, bot_edge, top_edge)
+        #Check if running mean was already done and if recalc is requested
+        if exists(out_file) and not recalc:
+            _f = _ncf.netcdf_file(out_file, 'r')
+            result = _f.variables[nc_varname].data
+            return (result, bot_edge, top_edge)
 
         #Calculate the running average
         pool = Pool(PROCESSES)
@@ -117,8 +112,8 @@ def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False):
         p = Popen(execArgs, shell=True)
         p.wait()
             
-        f = ncf.netcdf_file(out_file, 'r')
-        result = f.variables[nc_varname].data
+        _f = _ncf.netcdf_file(out_file, 'r')
+        result = _f.variables[nc_varname].data
 
     else:
         result = np.zeros(new_shape)

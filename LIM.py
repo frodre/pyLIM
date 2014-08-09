@@ -13,13 +13,9 @@ import numpy as np
 from scipy.io import netcdf as ncf
 from scipy.signal import detrend
 import Stats as st
-import matplotlib.pyplot as plt
 from time import time
 from random import sample
 import os
-
-#Clear all previous plots
-plt.close('all')
 
 wsize = 12
 var_name = 'air'
@@ -39,6 +35,7 @@ else:
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
 tvar = f.variables[var_name]
+
 #account for data storage as int * scale + offset
 try:
     sf = tvar.scale_factor
@@ -59,7 +56,8 @@ print "Done! (Completed in %f s)" % dur
 new_shp = [run_mean.shape[0]/wsize, wsize] + list(run_mean.shape[1:])
 shp_run_mean = run_mean.reshape( new_shp )
 print "\nCalculating monthly climatology from running mean..."
-mon_climo = np.sum(shp_run_mean, axis=0)/float(new_shp[0])
+mon_climo = np.sum(shp_run_mean, axis=0)
+mon_climo = mon_climo/float(new_shp[0])
 print "Done!"
 
 #Remove the monthly climo from the running mean
@@ -80,7 +78,7 @@ eof_proj = np.dot(eofs.T, shp_anomaly.T)
 print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
 
 #Start running trials for LIM forecasts
-loc = 100 # just for testing right now
+loc = 10000 # just for testing right now
 time_dim = eof_proj.shape[1] - forecast_tlim
 tsample = int(time_dim*0.9)
 forecasts = np.zeros( [num_trials, forecast_tlim+1, neigs, (time_dim - tsample)] )
@@ -89,12 +87,13 @@ fcast_idxs = np.zeros ((num_trials, (time_dim - tsample)),
 
 for i in range(num_trials):
     print 'Running trial %i' % (i+1)
-    #randomize sample of indices for training and testing
+    # randomize sample of indices for training and testing
     rnd_idx = sample(xrange(time_dim), time_dim)
     train_idx = np.array(rnd_idx[0:tsample])
     indep_idx = np.array(rnd_idx[tsample:])
     fcast_idxs[i] = indep_idx
 
+    # forecast for each time
     for tau in range(forecast_tlim+1):
         x0 = eof_proj[:,train_idx]
         xt = eof_proj[:,(train_idx + tau)]
@@ -102,105 +101,17 @@ for i in range(num_trials):
         x0x0 = np.dot(x0, x0.T)
         M = np.dot(xtx0, np.linalg.pinv(x0x0))
 
-        #Test on independent data
+        # use independent data to make forecast
         x0i = eof_proj[:,indep_idx]
         xti = eof_proj[:,(indep_idx + tau)]
         xfi = np.dot(M, x0i)
         forecasts[i, tau] = xfi
-   
-#Move into physical space for error calc
-#forecast = np.dot(eofs, xfi)[loc]
-#true_space = shp_anomaly.T[loc, indep_idx + tau]
-#erri = forecast - true_space
-#error_stats[i, tau, :] = erri
 
-#Verification Stuff
-vs_trials = False
-vs_time = False
-vs_tau = True
-
-if vs_tau:
-    evar = np.zeros(forecast_tlim+1)
-    for tau in range(forecast_tlim+1):
-        tmpdata = forecasts[:,tau]
-        reconstructed = np.array([
-                            np.dot(eofs[loc], fcast)
-                            for fcast in tmpdata
-                        ])
-        truth = np.array([shp_anomaly.T[loc, idxs] for idxs in fcast_idxs])
-        error = reconstructed - truth
-        evar[tau] = error.var()
-        
-    fig, ax = plt.subplots()
-    ax.plot(evar)
-    ax.set_title('Error Variance vs. Forecast Lead Time')
-    ax.set_xlabel('Lead time (months)')
-    ax.set_ylabel('Error Variance (K)')
-    fig.show()
-
-if vs_trials:
-    lead_times = np.array([0, 1, 3, 6, 9, 12])*12
-    anom_truth = lambda x: np.array([shp_anomaly.T[loc, (fcast_idxs[i] + x)] 
-                                      for i in range(len(fcast_idxs))])
-    true_var = np.array([anom_truth(tau).var() for tau in lead_times]) 
-    true_mean = np.array([anom_truth(tau).mean() for tau in lead_times])
-    
-    fcast_var = np.zeros( (len(lead_times), num_trials) )
-    fcast_mean = np.zeros( fcast_var.shape )
-    
-    for i in range(len(lead_times)):
-        loc_fcast = np.array([np.dot(eofs[loc], fcast[lead_times[i]]) 
-                              for fcast in forecasts])
-        varis = np.zeros( len(loc_fcast) )
-        means = np.zeros( varis.shape )
-        for j in range(len(loc_fcast)):
-            varis[j] = loc_fcast[0:j+1].var() 
-            means[j] = loc_fcast[0:j+1].mean()
-        fcast_var[i,:] = varis
-        fcast_mean[i,:] = means
-    
-    fig, ax = plt.subplots(2,1, sharex=True)
-    x = range(fcast_var.shape[1])
-    
-    for i,var in enumerate(fcast_var):
-        ax[0].plot(x, var, linewidth=2, label='Lead Time = %i yr' % (lead_times[i]/12))
-        ax[0].legend()
-        ax[1].plot(x, fcast_mean[i], linewidth=2)
-    
-    for line, var in zip(ax[0].get_lines(), true_var):
-        ax[0].axhline(y=var, linestyle = '--', color = line.get_color())
-    
-    ax[0].set_title('Forecast Variance & Mean vs. # Trials (Single Gridpoint)')
-    ax[1].set_xlabel('Trial #')
-    ax[0].set_ylabel('Variance (K)')
-    ax[1].set_ylabel('Mean (K)')
-    fig.show()
-
-if vs_time:
-    #Variance and mean vs time sample in true space
-    var_vs_time = np.array([shp_anomaly.T[loc, 0:i].var() 
-                            for i in range(1,shp_anomaly.shape[0])])
-    mean_vs_time = np.array([shp_anomaly.T[loc, 0:i].mean()
-                            for i in range(1, shp_anomaly.shape[0])])
-    varfig, varax = plt.subplots()
-    varax.plot(var_vs_time, label='Variance')
-    varax.plot(mean_vs_time, label = 'Mean')
-    varax.axvline(x = 0, color = 'r')
-    varax.axvline(x = time_dim, color = 'r')
-    varax.axvline(x = forecast_tlim, color = 'y')
-    varax.axvline(x = shp_anomaly.shape[0], color = 'y')
-    varax.axhline(y = 0, linewidth = 1, c='k')
-    varax.set_title('variance and mean w/ increasing time sample')
-    varax.set_xlabel('Times included (0 to this month)')
-    varax.set_ylabel('Variance & Mean (K)')
-    varax.legend(loc=9)
-    varfig.show()
-    
-    runfig, runax = plt.subplots()
-    runax.plot(shp_anomaly.T[loc,:])
-    runax.set_title('Time series at loc = %i (12-mon running mean)' % loc)
-    runax.set_xlabel('Month')
-    runax.set_ylabel('Temp Anomaly (K)')
-    runfig.show()
+# Save important vars (Eventually streamlined to some HDF5 set)
+np.save('forecasts.npy', forecasts)
+np.save('eofs.npy', eofs)
+np.save('eof_proj.npy', eof_proj)
+np.save('spatial_anomaly_srs.npy', anomaly_srs)
+np.save('fcast_idxs.npy', fcast_idxs)
 
 f.close()
