@@ -111,7 +111,7 @@ for i in range(num_trials):
 np.save('forecasts.npy', forecasts)
 np.save('eofs.npy', eofs)
 np.save('eof_proj.npy', eof_proj)
-np.save('spatial_anomaly_srs.npy', anomaly_srs)
+np.save('spatial_anomaly_srs.npy', shp_anomaly)
 np.save('fcast_idxs.npy', fcast_idxs)
 
 f.close()
