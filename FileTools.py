@@ -38,7 +38,7 @@ def fcast_corr(fcast_data, _eofs, truth, idxs, outfile):
             
     corrDf = corrDf.transpose()
     corrDf = corrDf.reset_index(drop=True)        
-    return corrDf.transpose()
+    return corrDf
     
 def plot_corrdata(lats, lons, data, title, outfile):
     contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
