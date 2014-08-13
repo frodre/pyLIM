@@ -1,5 +1,4 @@
 import pandas as pd
-import tables as tbl
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
@@ -14,8 +13,8 @@ def fcast_corr(fcast_data, _eofs, truth, idxs, outfile):
     tmp = np.zeros( dshape )
     true_state = np.zeros( dshape )
     corrDf = None
-    atom = tbl.Atom.from_dtype(tmp.dtype)
-    filters = tbl.Filters(complib='blosc', complevel=5)
+    #atom = tbl.Atom.from_dtype(tmp.dtype)
+    #filters = tbl.Filters(complib='blosc', complevel=5)
     
     for i in xrange(len(idxs)):
         ii = i*tslice
@@ -36,18 +35,25 @@ def fcast_corr(fcast_data, _eofs, truth, idxs, outfile):
             corrDf = pd.concat([corrDf,corr], axis=1)
         else:
             corrDf = corr
-        
+            
+    corrDf = corrDf.transpose()
+    corrDf = corrDf.reset_index(drop=True)        
     return corrDf.transpose()
     
-def plot_corrdata(lats, lons, data, title):
+def plot_corrdata(lats, lons, data, title, outfile):
+    contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
+    cbticks = np.linspace(0,1,11)
     plt.close('all')
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
-    cf = m.contourf(lons, lats, data, latlon=True, cmap=cm.OrRd)
-    m.colorbar()
+    color = cm.OrRd
+    color.set_under('#9acce5')
+    m.contourf(lons, lats, data, latlon=True, cmap=color,
+               vmin=0, levels = contourlev)
+    m.colorbar(ticks=cbticks)
     plt.title(title)
-    plt.show()
+    plt.savefig(outfile, format='png')
     
 if __name__ == "__main__":
     fcasts = np.load('forecasts.npy')

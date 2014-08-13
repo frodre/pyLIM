@@ -23,7 +23,7 @@ neigs = 30
 num_trials = 40 
 forecast_tlim = 144 #months
 NCO = True #NetCDF Operators Flag, always false on Windows for now
-detrend_data=True 
+detrend_data=False 
 
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
