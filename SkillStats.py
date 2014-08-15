@@ -1,6 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+forecasts = np.load('forecasts.npy')
+eofs = np.load('eofs.npy')
+shp_anomaly = np.load('spatial_anomaly_srs.npy')
+fcast_idxs = np.load('fcast_idxs.npy')
+
 #Verification Stuff
 vs_trials = False
 vs_time = False

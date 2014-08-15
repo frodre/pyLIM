@@ -63,7 +63,7 @@ print "Done!"
 #Remove the monthly climo from the running mean
 anomaly_srs = (shp_run_mean - mon_climo).reshape(([new_shp[0]*wsize] + new_shp[2:]))
 if detrend_data:
-    anomaly_srs = detrend(anomaly_srs, axis=0, type='linear', bp=(900,))
+    anomaly_srs = detrend(anomaly_srs, axis=0, type='linear')
 
 #Calculate EOFs
 shp = anomaly_srs.shape
@@ -78,12 +78,10 @@ eof_proj = np.dot(eofs.T, shp_anomaly.T)
 print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
 
 #Start running trials for LIM forecasts
-loc = 10000 # just for testing right now
 time_dim = eof_proj.shape[1] - forecast_tlim
 tsample = int(time_dim*0.9)
 forecasts = np.zeros( [num_trials, forecast_tlim+1, neigs, (time_dim - tsample)] )
-fcast_idxs = np.zeros ((num_trials, (time_dim - tsample)),
-                        dtype=np.int16)
+fcast_idxs = np.zeros ((num_trials, (time_dim - tsample)), dtype=np.int16)
 
 for i in range(num_trials):
     print 'Running trial %i' % (i+1)

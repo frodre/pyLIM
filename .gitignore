@@ -60,3 +60,7 @@ docs/_build/
 #Data Files
 *.npy
 *.h5
+
+#Ipython stuff 
+*.ipynb
+matplotlibrc
