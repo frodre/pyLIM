@@ -9,7 +9,7 @@ def fcast_corr(fcast_data, eof_data, obs, obs_tidxs, outfile):
     nlocs = eof_data.shape[0]
     tslice = fcast_data.shape[3]
     nfcasts = fcast_data.shape[1]
-    dshape = (nlocs, ntrials*tslice)
+    dshape = (ntrials*tslice, nlocs)
     tmp = np.zeros( dshape )
     true_state = np.zeros( dshape )
     corrDf = None
@@ -19,15 +19,15 @@ def fcast_corr(fcast_data, eof_data, obs, obs_tidxs, outfile):
     
     for tau in xrange(nfcasts):
         print 'Forecast #%i' % tau
-        for i in xrange(len(obs_tidxs)):
+        for i in xrange(ntrials):
             ii = i*tslice
-            true_state[:,ii:ii+tslice] = obs[:,(obs_tidxs[i]+tau)]
+            true_state[ii:ii+tslice, :] = obs[(obs_tidxs[i]+tau), :]
         for trial in xrange(ntrials):
             j = trial*tslice
-            tmp[:,j:j+tslice] = np.dot(eof_data, fcast_data[trial, tau])
+            tmp[j:j+tslice, :] = np.dot(eof_data, fcast_data[trial, tau]).T
             
-        df1 = pd.DataFrame(true_state.T)
-        df2 = pd.DataFrame(tmp.T)
+        df1 = pd.DataFrame(true_state)
+        df2 = pd.DataFrame(tmp)
         corr = df1.corrwith(df2)
         
         if corrDf is not None:
@@ -38,6 +38,48 @@ def fcast_corr(fcast_data, eof_data, obs, obs_tidxs, outfile):
     corrDf = corrDf.transpose()
     corrDf = corrDf.reset_index(drop=True)        
     return corrDf
+    
+def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
+    ntrials = fcast_data.shape[0]
+    nlocs = eof_data.shape[0]
+    tslice = fcast_data.shape[3]
+    nfcasts = fcast_data.shape[1]
+    dshape = (ntrials*tslice, nlocs)
+    tmp = np.zeros( dshape )
+    true_state = np.zeros( dshape )
+    evarDf = None
+    #atom = tbl.Atom.from_dtype(tmp.dtype)
+    #filters = tbl.Filters(complib='blosc', complevel=5)
+    cvar = obs.var(axis=0)
+            
+    for tau in xrange(nfcasts):
+        print 'Forecast #%i' % tau
+        for i in xrange(ntrials):
+            ii = i*tslice
+            true_state[ii:ii+tslice, :] = obs[(obs_tidxs[i]+tau), :]
+        for trial in xrange(ntrials):
+            j = trial*tslice
+            tmp[j:j+tslice, :] = np.dot(eof_data, fcast_data[trial, tau]).T
+            
+        error = true_state - tmp
+        df1 = pd.DataFrame(error)
+        print df1.shape
+        evar = df1.var(axis=0)
+        ce = 1 - (evar.values **2)/cvar**2
+        ce = pd.Series(ce)
+        
+        
+        if evarDf is not None:
+            evarDf = pd.concat([evarDf,ce], axis=1)
+        else:
+            evarDf = ce
+            
+    evarDf = evarDf.transpose()
+    evarDf = evarDf.reset_index(drop=True)        
+    return evarDf
+    
+def climo_var(full_obs):
+    pass
 
     
 ####  PLOTTING FUNCTIONS  ####
@@ -54,6 +96,21 @@ def plot_corrdata(lats, lons, data, title, outfile):
     m.contourf(lons, lats, data, latlon=True, cmap=color,
                vmin=0, levels = contourlev)
     m.colorbar(ticks=cbticks)
+    plt.title(title)
+    plt.savefig(outfile, format='png')
+
+def plot_cedata(lats, lons, data, title, outfile):
+    #contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
+    #cbticks = np.linspace(0,1,11)
+    plt.close('all')
+    m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
+                llcrnrlon=0, urcrnrlon=360, resolution='c')
+    m.drawcoastlines()
+    color = cm.bwr
+    #color.set_under('#9acce5')
+    m.contourf(lons, lats, data, latlon=True, cmap=color,
+               vmin=0)
+    m.colorbar()
     plt.title(title)
     plt.savefig(outfile, format='png')
     
@@ -145,7 +202,9 @@ def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
 if __name__ == "__main__":
     fcasts = np.load('forecasts.npy')
     eofs = np.load('eofs.npy')
-    shp_anom = np.load('spatial_anomaly_srs.npy').T
+    shp_anom = np.load('spatial_anomaly_srs.npy')
     idxs = np.load('fcast_idxs.npy')
-    result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
-    result.to_hdf('fcast_corr.h5', 'w')
+    #result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
+    #result.to_hdf('fcast_corr.h5', 'w')
+    result = fcast_ce(fcasts, eofs, shp_anom, idxs)
+    result.to_hdf('fcast_ce.h5', 'ce')

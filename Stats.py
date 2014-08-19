@@ -155,14 +155,13 @@ def calcEOF(data, num_eigs, useSVD = True, retPCs = False):
         tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
 
     else:
-        cov = np.linalg.cov(data)
+        cov = np.cov(data)
         eig_vals, eofs = eigs(cov, k=num_eigs)
         tot_var = eig_vals.real.sum()/cov.trace()
-        cov = np.linalg.cov(data.T)
-        pcs, trash = eigs(cov, k=num_eigs)
+        #pcs, trash = eigs(cov, k=num_eigs)
 
-    if retPCs:
-        return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var, pcs[0:num_eigs])
-    else:
-        return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
+    #if retPCs:
+    #    return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var, pcs[0:num_eigs])
+    #else:
+    return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
 

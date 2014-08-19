@@ -23,7 +23,7 @@ neigs = 30
 num_trials = 40 
 forecast_tlim = 144 #months
 NCO = True #NetCDF Operators Flag, always false on Windows for now
-detrend_data=False 
+detrend_data=True 
 
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
@@ -63,17 +63,19 @@ print "Done!"
 #Remove the monthly climo from the running mean
 anomaly_srs = (shp_run_mean - mon_climo).reshape(([new_shp[0]*wsize] + new_shp[2:]))
 if detrend_data:
-    anomaly_srs = detrend(anomaly_srs, axis=0, type='linear')
+    anomaly_srs = detrend(anomaly_srs, axis=0, type='linear', bp=900)
 
 #Calculate EOFs
 shp = anomaly_srs.shape
 shp_anomaly = anomaly_srs.reshape(shp[0], shp[1]*shp[2])
 print "\nCalculating EOFs..."
 t1 = time()
-eofs, eig_vals, var_pct = st.calcEOF(shp_anomaly.T, neigs)
+tmp_spat = np.copy(shp_anomaly.T)
+eofs, eig_vals, var_pct = st.calcEOF(tmp_spat, neigs)
 dur = time() - t1
 print "Done! (Completed in %.1f s)" % dur
-eof_proj = np.dot(eofs.T, shp_anomaly.T)
+eof_proj = np.dot(eofs.T, tmp_spat)
+del tmp_spat
 
 print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
 
