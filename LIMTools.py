@@ -47,7 +47,7 @@ def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
     dshape = (ntrials*tslice, nlocs)
     tmp = np.zeros( dshape )
     true_state = np.zeros( dshape )
-    evarDf = None
+    evarMatr = np.zeros( (ntrials, nlocs) )
     #atom = tbl.Atom.from_dtype(tmp.dtype)
     #filters = tbl.Filters(complib='blosc', complevel=5)
     cvar = obs.var(axis=0)
@@ -62,21 +62,11 @@ def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
             tmp[j:j+tslice, :] = np.dot(eof_data, fcast_data[trial, tau]).T
             
         error = true_state - tmp
-        df1 = pd.DataFrame(error)
-        print df1.shape
-        evar = df1.var(axis=0)
-        ce = 1 - (evar.values **2)/cvar**2
-        ce = pd.Series(ce)
-        
-        
-        if evarDf is not None:
-            evarDf = pd.concat([evarDf,ce], axis=1)
-        else:
-            evarDf = ce
-            
-    evarDf = evarDf.transpose()
-    evarDf = evarDf.reset_index(drop=True)        
-    return evarDf
+        evar = error.var(axis=0)
+        ce = 1 - (evar**2)/cvar**2
+        evarMatr[i,:] = ce
+                
+    return evarMatr
     
 def climo_var(full_obs):
     pass
@@ -106,8 +96,10 @@ def plot_cedata(lats, lons, data, title, outfile):
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
-    color = cm.bwr
-    #color.set_under('#9acce5')
+    if data.min < 0:
+        color = cm.bwr
+    else:
+        color = cm.OrRd
     m.contourf(lons, lats, data, latlon=True, cmap=color,
                vmin=0)
     m.colorbar()
@@ -206,5 +198,5 @@ if __name__ == "__main__":
     idxs = np.load('fcast_idxs.npy')
     #result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
     #result.to_hdf('fcast_corr.h5', 'w')
-    result = fcast_ce(fcasts, eofs, shp_anom, idxs)
-    result.to_hdf('fcast_ce.h5', 'ce')
+    #result = fcast_ce(fcasts, eofs, shp_anom, idxs)
+    #result.to_hdf('fcast_ce.h5', 'ce')

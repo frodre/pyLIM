@@ -22,15 +22,15 @@ var_name = 'air'
 neigs = 30
 num_trials = 40 
 forecast_tlim = 144 #months
-NCO = True #NetCDF Operators Flag, always false on Windows for now
+NCO = False #NetCDF Operators Flag, always false on Windows for now
 detrend_data=True 
 
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
     NCO = False
 else:
-    #data_file = '/home/melt/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
-    data_file = '/home/melt/wperkins/data/20CR/air.2m.mon.mean.nc'
+    #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
+    data_file = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
 
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
