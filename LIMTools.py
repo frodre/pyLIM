@@ -1,8 +1,11 @@
 import pandas as pd
+import tables as tb
+from os.path import join
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 import matplotlib.cm as cm
+
 
 def fcast_corr(fcast_data, eof_data, obs, obs_tidxs, outfile):
     ntrials = fcast_data.shape[0]
@@ -12,10 +15,7 @@ def fcast_corr(fcast_data, eof_data, obs, obs_tidxs, outfile):
     dshape = (ntrials*tslice, nlocs)
     tmp = np.zeros( dshape )
     true_state = np.zeros( dshape )
-    corrDf = None
-    #atom = tbl.Atom.from_dtype(tmp.dtype)
-    #filters = tbl.Filters(complib='blosc', complevel=5)
-    
+    corrDf = None    
     
     for tau in xrange(nfcasts):
         print 'Forecast #%i' % tau
@@ -47,9 +47,7 @@ def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
     dshape = (ntrials*tslice, nlocs)
     tmp = np.zeros( dshape )
     true_state = np.zeros( dshape )
-    evarMatr = np.zeros( (ntrials, nlocs) )
-    #atom = tbl.Atom.from_dtype(tmp.dtype)
-    #filters = tbl.Filters(complib='blosc', complevel=5)
+    evarMatr = np.zeros( (nfcasts, nlocs) )
     cvar = obs.var(axis=0)
             
     for tau in xrange(nfcasts):
@@ -60,11 +58,11 @@ def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
         for trial in xrange(ntrials):
             j = trial*tslice
             tmp[j:j+tslice, :] = np.dot(eof_data, fcast_data[trial, tau]).T
-            
-        error = true_state - tmp
-        evar = error.var(axis=0)
-        ce = 1 - (evar**2)/cvar**2
-        evarMatr[i,:] = ce
+        return (true_state, tmp)
+        error = (true_state - tmp)**2
+        evar = error.sum(axis=0)/(len(error))
+        ce = 1 - evar/cvar
+        evarMatr[tau,:] = ce
                 
     return evarMatr
     
@@ -96,12 +94,17 @@ def plot_cedata(lats, lons, data, title, outfile):
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
-    if data.min < 0:
+    
+    contourlev = np.linspace(0,1,11)
+    
+    if data.min() < 0:
         color = cm.bwr
+        neglev = np.linspace(data.min(), 0, 10)
+        contourlev = np.concat(neglev, contourlev)
     else:
         color = cm.OrRd
-    m.contourf(lons, lats, data, latlon=True, cmap=color,
-               vmin=0)
+        
+    m.contourf(lons, lats, data, latlon=True, cmap=color, levels=contourlev)
     m.colorbar()
     plt.title(title)
     plt.savefig(outfile, format='png')
@@ -191,12 +194,22 @@ def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
     ax[1].set_ylabel('Mean (K)')
     fig.show()
     
+
 if __name__ == "__main__":
-    fcasts = np.load('forecasts.npy')
-    eofs = np.load('eofs.npy')
-    shp_anom = np.load('spatial_anomaly_srs.npy')
-    idxs = np.load('fcast_idxs.npy')
+    folder = 'new_detrended'
+    fcasts = np.load(join(folder,'forecasts.npy'))
+    eofs = np.load(join(folder,'eofs.npy'))
+    shp_anom = np.load(join(folder,'spatial_anomaly_srs.npy'))
+    idxs = np.load(join(folder,'fcast_idxs.npy'))
     #result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
     #result.to_hdf('fcast_corr.h5', 'w')
-    #result = fcast_ce(fcasts, eofs, shp_anom, idxs)
-    #result.to_hdf('fcast_ce.h5', 'ce')
+    result = fcast_ce(fcasts, eofs, shp_anom, idxs)
+    f = tb.open_file('stat_results.h5', mode='w')
+    grp = f.create_group('/', 'stats')
+    atom = tb.Atom.from_dtype(result.dtype)
+    filt = tb.Filters(complevel=2, complib='blosc')
+    dset = f.create_carray(grp, 'ce', atom, result.shape, filters = filt)
+    dset = result
+    f.close()
+    
+        

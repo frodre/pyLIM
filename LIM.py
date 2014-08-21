@@ -7,30 +7,36 @@ Currently performing a LIM study on surface temps to try and recreate
 the findings from Newman 2014.  Script assumes that it is already in
 monthly mean format.
 
+Author: Andre Perkins
 """
 
 import numpy as np
+import Stats as st
 from scipy.io import netcdf as ncf
 from scipy.signal import detrend
-import Stats as st
 from time import time
 from random import sample
 import os
 
-wsize = 12
-var_name = 'air'
-neigs = 30
-num_trials = 40 
-forecast_tlim = 144 #months
-NCO = False #NetCDF Operators Flag, always false on Windows for now
-detrend_data=True 
+#### LIM PARAMETERS ####
 
+wsize = 12          # window size for running average
+var_name = 'air'    # variable name in netcdf file
+neigs = 30          # number of eof compontents to retain
+num_trials = 40     # number of lim trials to run
+forecast_tlim = 144 # number months to forecast
+NCO = False         # use NetCDF Operators Flag (invalid for my windows machine)
+detrend_data=True   # linearly detrend the observations
+
+# Check os, use appropriate data files
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
     NCO = False
 else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
     data_file = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
+
+#### LOAD DATA ####
 
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
@@ -43,6 +49,8 @@ try:
     tdata = tvar.data*sf + offset
 except AttributeError:
     tdata = tvar.data
+    
+#### RUN LIM ####
 
 #Calc running mean using window size over the data
 print "\nCalculating running mean..."
