@@ -11,7 +11,7 @@ from multiprocessing import Pool
 from os.path import exists, splitext
 from scipy.sparse.linalg import eigs
 
-def runMean(data, window_size, h5_file=None):
+def runMean(data, window_size, h5_file=None, h5_parent=None):
     """
     A function for calculating the running mean on data.
 
@@ -24,6 +24,8 @@ def runMean(data, window_size, h5_file=None):
         Size of the window to compute the running mean over.
     h5_file:  tables.file.File, optional
        Output hdf5 file (utilizes pyTables) for the calculated running mean.
+    h5_parent: tables.group.*, optional
+        Parent node to place run_mean dataset under.
 
     Returns
     -------
@@ -34,11 +36,6 @@ def runMean(data, window_size, h5_file=None):
     top_edge: int
         Number of elements removed from the ending of the time series
     """
-
-
-    #_DEBUG = False
-    #useNCO = False
-    #PROCESSES = 2
     
     dshape = data.shape
     top_edge = window_size/2 + 1
@@ -47,76 +44,27 @@ def runMean(data, window_size, h5_file=None):
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
 
-#    #Use netCDF operators on system instead of python based running mean (saves
-#    #  memory).  For now I suggest using this method.
-#    # NCO RETIRED FOR NOW
-#    if useNCO:
-#        inFile = 'netcdf_file.nc'
-#        inFile_no_ext, file_ext = splitext(inFile)
-#        file_ext = file_ext.strip('.')
-#        pad_len = len(str(new_shape[0])) #calculate padding for tmp file numbers
-#        fmt_str = '%s0%ii' % ('%', pad_len)
-#        wildcard = '?'*pad_len
-#        out_file = '.'.join([inFile_no_ext, '%imon_runmean' % window_size, file_ext])
-#
-#        if _DEBUG:
-#            print 'inFile: %s' % inFile
-#            print 'out_file: %s' % out_file
-#            print 'file_ext: %s' % file_ext
-#            print 'inFile_no_ext: %s' % inFile_no_ext
-#
-#        #Check if running mean was already done and if recalc is requested
-#        #if exists(out_file) and not recalc:
-#            #_f = _ncf.netcdf_file(out_file, 'r')
-#            #result = _f.variables[nc_varname].data
-#            #return (result, bot_edge, top_edge)
-#
-#        #Calculate the running average
-#        pool = Pool(PROCESSES)
-#        cmds = [ ['ncra',
-#                  '-O', 
-#                  '-d', 
-#                  'time,%i,%i' % (idx, idx+window_size-1),
-#                  inFile,
-#                  '.'.join([inFile_no_ext, fmt_str % idx, 'tmp']) #temporary out file
-#                  ] for idx in range(new_shape[0])
-#                ]
-#        for i,retcode in enumerate(pool.imap_unordered(call, cmds, chunksize=100)):
-#             if (i % (10**(pad_len-2)) == 0):
-#                 print 'Processed %i of %i' % (i, new_shape[0])
-#
-#        if _DEBUG: print cmds[0:2]
-#        
-#        #Concatenate tmp files
-#        tmp_files = '.'.join([inFile_no_ext, wildcard, 'tmp'])
-#        execArgs = ' '.join(['ncrcat', '-O', tmp_files, out_file])
-#        p = Popen(execArgs, shell=True)
-#        p.wait()
-#
-#        #Remove tmp files
-#        execArgs = ' '.join(['rm', '-f', '.'.join([inFile_no_ext, '*.tmp'])])
-#        p = Popen(execArgs, shell=True)
-#        p.wait()
-#            
-#        _f = _ncf.netcdf_file(out_file, 'r')
-#        #result = _f.variables[nc_varname].data
-
     if h5_file is not None:
+        ish5 = True
+        if h5_parent is None:
+            h5_parent = h5_file.root
+        
         try:
-            result = h5_file.create_carray(h5_file.root.data, 
+            result = h5_file.create_carray(h5_parent, 
                                        'run_mean',
                                        atom = tb.Atom.from_dtype(data.dtype),
                                        shape = new_shape,
                                        title = '12-month running mean')
         except tb.NodeError:
-            h5_file.remove_node(h5_file.root.data.run_mean)
-            result = h5_file.create_carray(h5_file.root.data, 
+            h5_file.remove_node(h5_parent.run_mean)
+            result = h5_file.create_carray(h5_parent, 
                                        'run_mean',
                                        atom = tb.Atom.from_dtype(data.dtype),
                                        shape = new_shape,
                                        title = '12-month running mean')
             
-    else:                                       
+    else:
+        ish5 = False                                       
         result = np.zeros(new_shape, dtype=data.dtype)
         
     for cntr in xrange(new_shape[0]):
@@ -124,8 +72,11 @@ def runMean(data, window_size, h5_file=None):
             print 'Calc for index %i' % cntr
         result[cntr] = (data[(cntr):(cntr+top_edge+bot_edge)].sum(axis=0) / 
                         float(window_size))
+                        
+    if ish5:
+        result = result.read()
     
-    return (result.read(), bot_edge, top_edge)
+    return (result, bot_edge, top_edge)
    
 
 def calcEOF(data, num_eigs, useSVD = True, retPCs = False):
