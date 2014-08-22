@@ -1,7 +1,7 @@
 import pandas as pd
 import tables as tb
-from os.path import join
 import numpy as np
+import numexpr as ne
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 import matplotlib.cm as cm
@@ -58,8 +58,7 @@ def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
         for trial in xrange(ntrials):
             j = trial*tslice
             tmp[j:j+tslice, :] = np.dot(eof_data, fcast_data[trial, tau]).T
-        return (true_state, tmp)
-        error = (true_state - tmp)**2
+        error = ne.evaluate('true_state**2 - tmp*true_state + tmp**2')
         evar = error.sum(axis=0)/(len(error))
         ce = 1 - evar/cvar
         evarMatr[tau,:] = ce
@@ -196,20 +195,23 @@ def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
     
 
 if __name__ == "__main__":
-    folder = 'new_detrended'
-    fcasts = np.load(join(folder,'forecasts.npy'))
-    eofs = np.load(join(folder,'eofs.npy'))
-    shp_anom = np.load(join(folder,'spatial_anomaly_srs.npy'))
-    idxs = np.load(join(folder,'fcast_idxs.npy'))
+    outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
+    h5file = tb.open_file(outfile, mode='a')
+    fcasts = h5file.root.data.forecasts.read()
+    eofs = h5file.root.data.eofs.read()
+    shp_anom = h5file.root.data.anomaly_srs.read()
+    idxs = h5file.root.data.fcast_idxs.read()
     #result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
     #result.to_hdf('fcast_corr.h5', 'w')
     result = fcast_ce(fcasts, eofs, shp_anom, idxs)
-    f = tb.open_file('stat_results.h5', mode='w')
-    grp = f.create_group('/', 'stats')
-    atom = tb.Atom.from_dtype(result.dtype)
-    filt = tb.Filters(complevel=2, complib='blosc')
-    dset = f.create_carray(grp, 'ce', atom, result.shape, filters = filt)
-    dset = result
-    f.close()
+    try:
+        h5file.create_group(h5file.root, 'stats')
+    except tb.NodeError:
+        pass    
+    dset = h5file.create_carray(h5file.root.stats, 'ce', 
+                                atom = tb.Atom.from_dtype(result.dtype),
+                                shape = result.shape)
+    dset[:] = result
+    h5file.close()
     
         

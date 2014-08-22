@@ -5,10 +5,6 @@ Toolbox for statistical methods.
 
 import numpy as np
 import tables as tb
-import scipy.io.netcdf as _ncf
-from subprocess import call, Popen
-from multiprocessing import Pool
-from os.path import exists, splitext
 from scipy.sparse.linalg import eigs
 
 def runMean(data, window_size, h5_file=None, h5_parent=None):
