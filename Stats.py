@@ -102,11 +102,20 @@ def runMean(data, window_size, h5_file=None):
 #        #result = _f.variables[nc_varname].data
 
     if h5_file is not None:
-        result = h5_file.create_carray(h5_file.root.data, 
+        try:
+            result = h5_file.create_carray(h5_file.root.data, 
                                        'run_mean',
                                        atom = tb.Atom.from_dtype(data.dtype),
                                        shape = new_shape,
                                        title = '12-month running mean')
+        except tb.NodeError:
+            h5_file.remove_node(h5_file.root.data.run_mean)
+            result = h5_file.create_carray(h5_file.root.data, 
+                                       'run_mean',
+                                       atom = tb.Atom.from_dtype(data.dtype),
+                                       shape = new_shape,
+                                       title = '12-month running mean')
+            
     else:                                       
         result = np.zeros(new_shape, dtype=data.dtype)
         
