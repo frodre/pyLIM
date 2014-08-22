@@ -12,6 +12,7 @@ Author: Andre Perkins
 
 import numpy as np
 import Stats as st
+import tables as tb
 from scipy.io import netcdf as ncf
 from scipy.signal import detrend
 from time import time
@@ -19,25 +20,26 @@ from random import sample
 import os
 
 #### LIM PARAMETERS ####
-
 wsize = 12          # window size for running average
 var_name = 'air'    # variable name in netcdf file
 neigs = 30          # number of eof compontents to retain
 num_trials = 40     # number of lim trials to run
 forecast_tlim = 144 # number months to forecast
-NCO = False         # use NetCDF Operators Flag (invalid for my windows machine)
+NCO = False         # use NetCDF Operators Flag 
 detrend_data=True   # linearly detrend the observations
 
 # Check os, use appropriate data files
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
-    NCO = False
+    output_file = "G:/Hakim Research/pyLIM/LIM_data.h5"
+    NCO = False  # cannot use NetCDF Ops on windows
 else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
     data_file = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
+    output_loc = '/home/chaos2/wperkins/pyLIM/LIM_data.h5'
+
 
 #### LOAD DATA ####
-
 #Load netcdf file
 f = ncf.netcdf_file(data_file, 'r')
 tvar = f.variables[var_name]
@@ -49,13 +51,29 @@ try:
     tdata = tvar.data*sf + offset
 except AttributeError:
     tdata = tvar.data
-    
-#### RUN LIM ####
 
+#flatten t-data
+spatial_shp = tdata.shape[1:]
+tdata = tdata.reshape( (tdata.shape[0], np.product(spatial_shp)) )
+
+#save data to hdf5 file
+out = tb.open_file(output_loc, mode='w')
+out.create_group(out.root,
+                 'data', 
+                 title = 'Observations & Forecast Data',
+                 filters = tb.Filters(complevel=2, complib='blosc'))
+obs_data = out.create_carray(out.root.data, 'obs',
+                             atom = tb.Atom.from_dtype( tdata.dtype ),
+                             shape = tdata.shape,
+                             title = 'Temp Observations')
+obs_data[:] = tdata 
+
+
+#### RUN LIM ####
 #Calc running mean using window size over the data
 print "\nCalculating running mean..."
 t1 = time()
-run_mean, bedge, tedge = st.runMean(f, var_name, wsize, num_procs=2, useNCO=NCO)
+run_mean, bedge, tedge = st.runMean(obs_data, wsize, )
 t2 = time()
 dur = t2 - t1
 print "Done! (Completed in %f s)" % dur
@@ -115,11 +133,11 @@ for i in range(num_trials):
         xfi = np.dot(M, x0i)
         forecasts[i, tau] = xfi
 
+#### STORE RESULTS ####
 # Save important vars (Eventually streamlined to some HDF5 set)
 np.save('forecasts.npy', forecasts)
 np.save('eofs.npy', eofs)
 np.save('eof_proj.npy', eof_proj)
 np.save('spatial_anomaly_srs.npy', shp_anomaly)
 np.save('fcast_idxs.npy', fcast_idxs)
-
 f.close()

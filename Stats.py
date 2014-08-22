@@ -4,31 +4,26 @@ Toolbox for statistical methods.
 """
 
 import numpy as np
+import tables as tb
 import scipy.io.netcdf as _ncf
 from subprocess import call, Popen
 from multiprocessing import Pool
 from os.path import exists, splitext
 from scipy.sparse.linalg import eigs
 
-def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False, recalc=False):
+def runMean(data, window_size, h5_file=None):
     """
     A function for calculating the running mean on data.
 
     Parameters
     ----------
-    nc_file: scipy.io.netcdf.netcdf_file
-        NetCDF file pointer for desired dataset.
-    nc_varname: str
-        Dictionary key of data to be averaged
+    data: ndarray
+        Data matrix to perform running mean over. Expected to be in time(row) x
+        space(column) format.
     window_size: int
         Size of the window to compute the running mean over.
-    num_procs: int, optional
-        Number of processes for calculating the running mean.  
-        The default value is 8. Only valid for useNCO=True.
-    useNCO: bool, optional
-        If the calculation is over a large dataset where memory use
-        may be an issue, the use of netCDF operators is likely a good
-        idea.  
+    h5_file:  tables.file.File, optional
+       Output hdf5 file (utilizes pyTables) for the calculated running mean.
 
     Returns
     -------
@@ -41,90 +36,87 @@ def runMean(nc_file, nc_varname, window_size, num_procs=None, useNCO=False, reca
     """
 
 
-    _DEBUG = False
-    if num_procs is not None:
-        PROCESSES = num_procs
-    else: PROCESSES = 8
-
-    #Load NetCDF data.  Try with scale_factor and offset first.
-    nc_var = nc_file.variables[nc_varname]
-    try:
-        sf = nc_var.scale_factor
-        offset = nc_var.add_offset
-        data = nc_var.data * sf + offset
-    except AttributeError:
-        data = nc_var.data
-      
+    #_DEBUG = False
+    #useNCO = False
+    #PROCESSES = 2
+    
     dshape = data.shape
     top_edge = window_size/2 + 1
     bot_edge = (window_size/2) + (window_size%2) - 1
-    tot_cut = top_edge + bot_edge  #TODO: fix off by one for even numbers
+    tot_cut = top_edge + bot_edge - 1
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
 
-    #Use netCDF operators on system instead of python based running mean (saves
-    #  memory).  For now I suggest using this method.
-    if useNCO:
-        inFile = nc_file.filename
-        inFile_no_ext, file_ext = splitext(inFile)
-        file_ext = file_ext.strip('.')
-        pad_len = len(str(new_shape[0])) #calculate padding for tmp file numbers
-        fmt_str = '%s0%ii' % ('%', pad_len)
-        wildcard = '?'*pad_len
-        out_file = '.'.join([inFile_no_ext, '%imon_runmean' % window_size, file_ext])
+#    #Use netCDF operators on system instead of python based running mean (saves
+#    #  memory).  For now I suggest using this method.
+#    # NCO RETIRED FOR NOW
+#    if useNCO:
+#        inFile = 'netcdf_file.nc'
+#        inFile_no_ext, file_ext = splitext(inFile)
+#        file_ext = file_ext.strip('.')
+#        pad_len = len(str(new_shape[0])) #calculate padding for tmp file numbers
+#        fmt_str = '%s0%ii' % ('%', pad_len)
+#        wildcard = '?'*pad_len
+#        out_file = '.'.join([inFile_no_ext, '%imon_runmean' % window_size, file_ext])
+#
+#        if _DEBUG:
+#            print 'inFile: %s' % inFile
+#            print 'out_file: %s' % out_file
+#            print 'file_ext: %s' % file_ext
+#            print 'inFile_no_ext: %s' % inFile_no_ext
+#
+#        #Check if running mean was already done and if recalc is requested
+#        #if exists(out_file) and not recalc:
+#            #_f = _ncf.netcdf_file(out_file, 'r')
+#            #result = _f.variables[nc_varname].data
+#            #return (result, bot_edge, top_edge)
+#
+#        #Calculate the running average
+#        pool = Pool(PROCESSES)
+#        cmds = [ ['ncra',
+#                  '-O', 
+#                  '-d', 
+#                  'time,%i,%i' % (idx, idx+window_size-1),
+#                  inFile,
+#                  '.'.join([inFile_no_ext, fmt_str % idx, 'tmp']) #temporary out file
+#                  ] for idx in range(new_shape[0])
+#                ]
+#        for i,retcode in enumerate(pool.imap_unordered(call, cmds, chunksize=100)):
+#             if (i % (10**(pad_len-2)) == 0):
+#                 print 'Processed %i of %i' % (i, new_shape[0])
+#
+#        if _DEBUG: print cmds[0:2]
+#        
+#        #Concatenate tmp files
+#        tmp_files = '.'.join([inFile_no_ext, wildcard, 'tmp'])
+#        execArgs = ' '.join(['ncrcat', '-O', tmp_files, out_file])
+#        p = Popen(execArgs, shell=True)
+#        p.wait()
+#
+#        #Remove tmp files
+#        execArgs = ' '.join(['rm', '-f', '.'.join([inFile_no_ext, '*.tmp'])])
+#        p = Popen(execArgs, shell=True)
+#        p.wait()
+#            
+#        _f = _ncf.netcdf_file(out_file, 'r')
+#        #result = _f.variables[nc_varname].data
 
-        if _DEBUG:
-            print 'inFile: %s' % inFile
-            print 'out_file: %s' % out_file
-            print 'file_ext: %s' % file_ext
-            print 'inFile_no_ext: %s' % inFile_no_ext
-
-        #Check if running mean was already done and if recalc is requested
-        if exists(out_file) and not recalc:
-            _f = _ncf.netcdf_file(out_file, 'r')
-            result = _f.variables[nc_varname].data
-            return (result, bot_edge, top_edge)
-
-        #Calculate the running average
-        pool = Pool(PROCESSES)
-        cmds = [ ['ncra',
-                  '-O', 
-                  '-d', 
-                  'time,%i,%i' % (idx, idx+window_size-1),
-                  inFile,
-                  '.'.join([inFile_no_ext, fmt_str % idx, 'tmp']) #temporary out file
-                  ] for idx in range(new_shape[0])
-                ]
-        for i,retcode in enumerate(pool.imap_unordered(call, cmds, chunksize=100)):
-             if (i % (10**(pad_len-2)) == 0):
-                 print 'Processed %i of %i' % (i, new_shape[0])
-
-        if _DEBUG: print cmds[0:2]
+    if h5_file is not None:
+        result = h5_file.create_carray(h5_file.root.data, 
+                                       'run_mean',
+                                       atom = tb.Atom.from_dtype(data.dtype),
+                                       shape = new_shape,
+                                       title = '12-month running mean')
+    else:                                       
+        result = np.zeros(new_shape, dtype=data.dtype)
         
-        #Concatenate tmp files
-        tmp_files = '.'.join([inFile_no_ext, wildcard, 'tmp'])
-        execArgs = ' '.join(['ncrcat', '-O', tmp_files, out_file])
-        p = Popen(execArgs, shell=True)
-        p.wait()
-
-        #Remove tmp files
-        execArgs = ' '.join(['rm', '-f', '.'.join([inFile_no_ext, '*.tmp'])])
-        p = Popen(execArgs, shell=True)
-        p.wait()
-            
-        _f = _ncf.netcdf_file(out_file, 'r')
-        result = _f.variables[nc_varname].data
-
-    else:
-        result = np.zeros(new_shape)
-
-        for cntr in range(new_shape[0]):
-            if cntr % 100 == 0:
-                print 'Calc for index %i' % cntr
-            result[cntr] = data[(cntr):(cntr+top_edge+bot_edge)].sum(axis=0)
-        result = result/float(window_size)
+    for cntr in xrange(new_shape[0]):
+        if cntr % 100 == 0:
+            print 'Calc for index %i' % cntr
+        result[cntr] = (data[(cntr):(cntr+top_edge+bot_edge)].sum(axis=0) / 
+                        float(window_size))
     
-    return (result, bot_edge, top_edge)
+    return (result.read(), bot_edge, top_edge)
    
 
 def calcEOF(data, num_eigs, useSVD = True, retPCs = False):
