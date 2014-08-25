@@ -36,7 +36,7 @@ if os.name == 'nt':
 else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
     data_file = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
-    output_loc = '/home/chaos2/wperkins/pyLIM/LIM_data.h5'
+    output_loc = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
 
 
 #### LOAD DATA ####
@@ -140,7 +140,6 @@ for i in range(num_trials):
         forecasts[i, tau] = xfi
 
 #### STORE RESULTS ####
-# Save important vars (Eventually streamlined to some HDF5 set)
 out.create_carray(out.root.data, 'forecasts',
                   atom = tb.Atom.from_dtype( forecasts.dtype ),
                   shape = forecasts.shape,
