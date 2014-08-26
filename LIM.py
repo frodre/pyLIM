@@ -94,19 +94,20 @@ print "Done! (Completed in %f s)" % dur
 #  to ensure that the running mean still only contains complete years.  This
 #  is done to make components of the analysis easier.
 run_mean = run_mean[(wsize-bedge):(len(run_mean)-tedge)]
-sys.exit()
 
 #Calculate monthly climatology
 print "\nCalculating climatology from running mean..."
-mon_climo = np.sum(run_mean, axis=0)
-mon_climo = mon_climo/float(run_mean.shape[0])
+old_shp = run_mean.shape
+new_shp = ( old_shp[0]/wsize, wsize, old_shp[1] )
+mon_climo = run_mean.reshape(new_shp).sum(axis=0)/float(new_shp[0])
 print "Done!"
 
 #Remove the climo mean from the running mean and detrend
-anomaly_srs = run_mean - mon_climo
+anomaly_srs = (run_mean.reshape(new_shp) - mon_climo).reshape(old_shp)
 if detrend_data:
     anomaly_srs = detrend(anomaly_srs, axis=0, type='linear')
 
+sys.exit()
 #Calculate EOFs
 print "\nCalculating EOFs..."
 t1 = time()
