@@ -34,14 +34,17 @@ def runMean(data, window_size, h5_file=None, h5_parent=None):
     """
     
     dshape = data.shape
-    top_edge = window_size/2 + 1
-    bot_edge = (window_size/2) + (window_size%2) - 1
-    tot_cut = top_edge + bot_edge - 1
+    assert( dshape[0] >= window_size ), ("Window size must be smaller than or "
+                                          "equal to the length of the time "
+                                          "dimension of the data.")
+    cut_from_top = window_size/2
+    cut_from_bot = (window_size/2) + (window_size%2) - 1
+    tot_cut = cut_from_top + cut_from_bot
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
 
     if h5_file is not None:
-        ish5 = True
+        is_h5 = True
         if h5_parent is None:
             h5_parent = h5_file.root
         
@@ -60,22 +63,22 @@ def runMean(data, window_size, h5_file=None, h5_parent=None):
                                        title = '12-month running mean')
             
     else:
-        ish5 = False                                       
+        is_h5 = False                                       
         result = np.zeros(new_shape, dtype=data.dtype)
         
     for cntr in xrange(new_shape[0]):
         if cntr % 100 == 0:
             print 'Calc for index %i' % cntr
-        result[cntr] = (data[(cntr):(cntr+top_edge+bot_edge)].sum(axis=0) / 
+        result[cntr] = (data[(cntr):(cntr+tot_cut+1)].sum(axis=0) / 
                         float(window_size))
                         
-    if ish5:
+    if is_h5:
         result = result.read()
     
-    return (result, bot_edge, top_edge)
+    return (result, cut_from_bot, cut_from_top)
    
 
-def calcEOF(data, num_eigs, useSVD = True, retPCs = False):
+def calcEOF(data, num_eigs, retPCs = False):
     """
     Method to calculate the EOFs of given  dataset.  This assumes data comes in as
     an m x n matrix where m is the spatial dimension and n is the sampling
@@ -87,8 +90,6 @@ def calcEOF(data, num_eigs, useSVD = True, retPCs = False):
         Dataset to calculate EOFs from
     num_eigs: int
         Number of eigenvalues/vectors to return.  Must be less than min(m, n).
-    useSVD: bool, optional
-        Use singular value decomposition to calculate the EOFs
     retPCs: bool, optional
         Return principal component matrix along with EOFs
 
@@ -96,20 +97,10 @@ def calcEOF(data, num_eigs, useSVD = True, retPCs = False):
     -------
 
     """
+    
+    eofs, E, pcs = np.linalg.svd(data, full_matrices=False)
+    eig_vals = (E ** 2) / (len(E) - 1.)
+    tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
 
-    if useSVD:
-        eofs, E, pcs = np.linalg.svd(data, full_matrices=False)
-        eig_vals = (E ** 2) / (len(E) - 1.)
-        tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
-
-    else:
-        cov = np.cov(data)
-        eig_vals, eofs = eigs(cov, k=num_eigs)
-        tot_var = eig_vals.real.sum()/cov.trace()
-        #pcs, trash = eigs(cov, k=num_eigs)
-
-    #if retPCs:
-    #    return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var, pcs[0:num_eigs])
-    #else:
     return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
 

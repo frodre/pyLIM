@@ -11,6 +11,7 @@ Author: Andre Perkins
 """
 
 import os
+import sys
 import numpy as np
 import Stats as st
 import tables as tb
@@ -24,7 +25,7 @@ wsize = 12          # window size for running average
 var_name = 'air'    # variable name in netcdf file
 neigs = 30          # number of eof compontents to retain
 num_trials = 40     # number of lim trials to run
-forecast_tlim = 144 # number months to forecast
+forecast_tlim = 12  # number years to forecast
 NCO = False         # use NetCDF Operators Flag 
 detrend_data=True   # linearly detrend the observations
 
@@ -63,7 +64,7 @@ out = tb.open_file(output_loc, mode='w')
 out.create_group(out.root,
                  'data', 
                  title = 'Observations & Forecast Data',
-                 filters = tb.Filters(complevel=2, complib='blosc'))
+                 filters = tb.Filters(complevel=4, complib='blosc'))
 obs_data = out.create_carray(out.root.data, 'obs',
                                  atom = tb.Atom.from_dtype( tdata.dtype ),
                                  shape = tdata.shape,
@@ -88,6 +89,12 @@ run_mean, bedge, tedge = st.runMean(obs_data.read(), wsize, out)
 t2 = time()
 dur = t2 - t1
 print "Done! (Completed in %f s)" % dur
+
+#Assuming data started on 1st month of year, shave off ends of running mean
+#  to ensure that the running mean still only contains complete years.  This
+#  is done to make components of the analysis easier.
+run_mean = run_mean[(wsize-bedge):(len(run_mean)-tedge)]
+sys.exit()
 
 #Calculate monthly climatology
 print "\nCalculating climatology from running mean..."
