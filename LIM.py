@@ -27,7 +27,7 @@ wsize = 12          # window size for running average
 yrsize = 12         # number of elements in year
 var_name = 'air'    # variable name in netcdf file
 neigs = 25          # number of eof compontents to retain
-num_trials = 10     # number of lim trials to run
+num_trials = 50     # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
 detrend_data=True   # linearly detrend the observations
 
@@ -121,6 +121,7 @@ hold_chunk = int(ceil(sample_tdim/12*0.1))     # Size(yr) of chunk to withhold f
 test_tdim = hold_chunk*12                      # Size of testing time series
 train_tdim = sample_tdim - test_tdim           # Size of training time series
 fcast_shp = [sample_tdim*test_tdim, old_shp[1]]
+test_start_idx = np.linspace(0, sample_tdim, num_trials).astype(np.int16)
 
 #Create individual forecast time arrays for trials to be stored
 fcast_grp = out.create_group(data_grp, 'fcast_bin')
@@ -131,7 +132,7 @@ out_fcast = [ out.create_carray(fcast_grp, 'f%i' % i,
               for i in xrange(len(fcast_times)) ]
 
 t1 = time()
-for trial in xrange(2):#sample_tdim):
+for j,trial in enumerate(test_start_idx):#sample_tdim):
     print 'Running trial %i' % (trial+1)
     
     #create training and testing set
@@ -180,12 +181,12 @@ for trial in xrange(2):#sample_tdim):
         xfi = np.dot(M, x0i)
         
         #project back into physical space and save
-        start = trial*test_tdim
-        fin = trial*test_tdim + test_tdim
+        start = j*test_tdim
+        fin = j*test_tdim + test_tdim
         out_fcast[i][start:fin] = np.dot(eofs, xfi).T.astype(anomaly_srs.dtype)
     
 t2 = time()
 dur = t2 - t1
-print '%i trials finished in %f s'  % (num_trials, dur)
+print '%i trials finished in %f s'  % (j, dur)
 
 out.close()
