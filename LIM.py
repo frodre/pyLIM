@@ -63,19 +63,20 @@ tdata = tdata.reshape( (tdata.shape[0], np.product(spatial_shp)) )
 
 #save data to hdf5 file
 out = tb.open_file(output_loc, mode='w')
-out.create_group(out.root,
-                 'data', 
-                 title = 'Observations & Forecast Data',
-                 filters = tb.Filters(complevel=4, complib='blosc'))
-obs_data = out.create_carray(out.root.data, 'obs',
+data_grp = out.create_group(out.root,
+                            'data', 
+                            title = 'Observations & Forecast Data',
+                            filters = tb.Filters(complevel=4, complib='blosc'))
+trials_grp = out.create_group(data_grp, 'trials')
+obs_data = out.create_carray(data_grp, 'obs',
                                  atom = tb.Atom.from_dtype( tdata.dtype ),
                                  shape = tdata.shape,
                                  title = 'Temp Observations')
-lat_data = out.create_carray(out.root.data, 'lats',
+lat_data = out.create_carray(data_grp, 'lats',
                                  atom = tb.Atom.from_dtype( lats.dtype ),
                                  shape = lats.shape,
                                  title = 'Latitudes')
-lon_data = out.create_carray(out.root.data, 'lons',
+lon_data = out.create_carray(data_grp, 'lons',
                                  atom = tb.Atom.from_dtype( lons.dtype ),
                                  shape = lons.shape,
                                  title = 'Longitudes')
@@ -104,17 +105,13 @@ print "Done!"
 anomaly_srs = (run_mean.reshape(new_shp) - obs_climo).reshape(old_shp)
 if detrend_data:
     anomaly_srs = detrend(anomaly_srs, axis=0, type='linear')
+    
 
-#Calculate EOFs
-#print "\nCalculating EOFs..."
-#t1 = time()
-#tmp_spat = np.copy(anomaly_srs.T, order='C')
-#eofs, eig_vals, var_pct = st.calcEOF(tmp_spat, neigs)
-#dur = time() - t1
-#print "Done! (Completed in %.1f s)" % dur
-#eof_proj = np.dot(eofs.T, tmp_spat)
-#del tmp_spat
-#print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
+out_anom = out.create_carray(data_grp, 'anomaly_srs',
+                             atom = tb.Atom.from_dtype(anomaly_srs.dtype),
+                             shape = anomaly_srs.shape,
+                             title = 'Detrended Monthly Anomaly Timeseries')
+out_anom[:] = anomaly_srs
 
 #Start running trials for LIM forecasts
 fcast_times = np.array([x*yrsize for x in range(forecast_tlim+1)], dtype=np.int16)
@@ -123,10 +120,18 @@ sample_tdim = old_shp[0] - fcast_tdim          # Size of useable time series for
 hold_chunk = int(ceil(sample_tdim/12*0.1))     # Size(yr) of chunk to withhold for testing
 test_tdim = hold_chunk*12                      # Size of testing time series
 train_tdim = sample_tdim - test_tdim           # Size of training time series
-forecasts = np.zeros( [num_trials, forecast_tlim+1, neigs, (sample_tdim - train_tdim)] )
+fcast_shp = [sample_tdim*test_tdim, old_shp[1]]
+
+#Create individual forecast time arrays for trials to be stored
+fcast_grp = out.create_group(data_grp, 'fcast_bin')
+out_fcast = [ out.create_carray(fcast_grp, 'f%i' % i, 
+                                atom=tb.Atom.from_dtype(np.dtype('float32')),
+                                shape = fcast_shp,
+                                title = '%i Year Forecast' % i)
+              for i in xrange(len(fcast_times)) ]
 
 t1 = time()
-for trial in xrange(num_trials):
+for trial in xrange(2):#sample_tdim):
     print 'Running trial %i' % (trial+1)
     
     #create training and testing set
@@ -173,27 +178,14 @@ for trial in xrange(num_trials):
         x0i = test_eof_proj[:,0:test_tdim]
         xti = test_eof_proj[:,tau:(test_tdim+tau)]
         xfi = np.dot(M, x0i)
-        forecasts[trial, i] = xfi
+        
+        #project back into physical space and save
+        start = trial*test_tdim
+        fin = trial*test_tdim + test_tdim
+        out_fcast[i][start:fin] = np.dot(eofs, xfi).T.astype(anomaly_srs.dtype)
+    
 t2 = time()
 dur = t2 - t1
 print '%i trials finished in %f s'  % (num_trials, dur)
-out.close()
-sys.exit()
-#### STORE RESULTS ####
-out.create_carray(out.root.data, 'forecasts',
-                  atom = tb.Atom.from_dtype( forecasts.dtype ),
-                  shape = forecasts.shape,
-                  title = 'EOF Space LIM Forecasts')
-out.create_carray(out.root.data, 'eofs',
-                  atom = tb.Atom.from_dtype( eofs.dtype ),
-                  shape = eofs.shape,
-                  title = 'Calculated EOFs')
-out.create_carray(out.root.data, 'anomaly_srs',
-                  atom = tb.Atom.from_dtype(anomaly_srs.dtype),
-                  shape = anomaly_srs.shape,
-                  title = 'Detrended Monthly Anomaly Timeseries')
-out.create_carray(out.root.data, 'fcast_idxs',
-                  atom = tb.Atom.from_dtype(fcast_idxs.dtype),
-                  shape = fcast_idxs.shape,
-                  title = 'Time Indices of Forecast Trial Samples')
+
 out.close()
