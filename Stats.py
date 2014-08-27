@@ -7,7 +7,7 @@ import numpy as np
 import tables as tb
 from scipy.sparse.linalg import eigs
 
-def runMean(data, window_size, h5_file=None, h5_parent=None):
+def runMean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
     """
     A function for calculating the running mean on data.
 
@@ -34,11 +34,18 @@ def runMean(data, window_size, h5_file=None, h5_parent=None):
     """
     
     dshape = data.shape
+    yrsize = 12
     assert( dshape[0] >= window_size ), ("Window size must be smaller than or "
                                           "equal to the length of the time "
                                           "dimension of the data.")
-    cut_from_top = window_size/2
-    cut_from_bot = (window_size/2) + (window_size%2) - 1
+    if shaveYr:
+        tedge = window_size/2
+        cut_from_top = tedge + yrsize - tedge%yrsize
+        bedge = (window_size/2) + (window_size%2) - 1
+        cut_from_bot = bedge + yrsize - bedge%yrsize
+    else:
+        cut_from_top = window_size/2
+        bedge = cut_from_bot = (window_size/2) + (window_size%2) - 1
     tot_cut = cut_from_top + cut_from_bot
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
@@ -66,10 +73,11 @@ def runMean(data, window_size, h5_file=None, h5_parent=None):
         is_h5 = False                                       
         result = np.zeros(new_shape, dtype=data.dtype)
         
-    for cntr in xrange(new_shape[0]):
-        if cntr % 100 == 0:
-            print 'Calc for index %i' % cntr
-        result[cntr] = (data[(cntr):(cntr+tot_cut+1)].sum(axis=0) / 
+    for i in xrange(new_shape[0]):
+        if i % 100 == 0:
+            print 'Calc for index %i' % i
+        cntr = cut_from_bot - bedge + i
+        result[i] = (data[(cntr):(cntr+window_size)].sum(axis=0) / 
                         float(window_size))
                         
     if is_h5:

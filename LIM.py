@@ -15,6 +15,7 @@ import sys
 import numpy as np
 import Stats as st
 import tables as tb
+from math import ceil
 from scipy.io import netcdf as ncf
 from scipy.signal import detrend
 from time import time
@@ -22,10 +23,11 @@ from random import sample
 
 #### LIM PARAMETERS ####
 wsize = 12          # window size for running average
+yrsize = 12         # number of elements in year
 var_name = 'air'    # variable name in netcdf file
 neigs = 30          # number of eof compontents to retain
 num_trials = 40     # number of lim trials to run
-forecast_tlim = 12  # number years to forecast
+forecast_tlim = 9   # number years to forecast
 NCO = False         # use NetCDF Operators Flag 
 detrend_data=True   # linearly detrend the observations
 
@@ -93,45 +95,61 @@ print "Done! (Completed in %f s)" % dur
 #Assuming data started on 1st month of year, shave off ends of running mean
 #  to ensure that the running mean still only contains complete years.  This
 #  is done to make components of the analysis easier.
-run_mean = run_mean[(wsize-bedge):(len(run_mean)-tedge)]
+run_mean = run_mean[(12-bedge%12):(len(run_mean)-tedge%yrsize)]
+shaved = (bedge+yrsize-bedge%yrsize, tedge+yrsize-tedge%yrsize)
+obs_use = [shaved[0], obs_data.shape[0]-shaved[1]]
 
-#Calculate monthly climatology
+
+#Calculate climatology
 print "\nCalculating climatology from running mean..."
 old_shp = run_mean.shape
-new_shp = ( old_shp[0]/wsize, wsize, old_shp[1] )
-mon_climo = run_mean.reshape(new_shp).sum(axis=0)/float(new_shp[0])
+new_shp = ( old_shp[0]/yrsize, yrsize, old_shp[1] )
+climo = run_mean.reshape(new_shp).sum(axis=0)/float(new_shp[0])
 print "Done!"
 
 #Remove the climo mean from the running mean and detrend
-anomaly_srs = (run_mean.reshape(new_shp) - mon_climo).reshape(old_shp)
+anomaly_srs = (run_mean.reshape(new_shp) - climo).reshape(old_shp)
 if detrend_data:
     anomaly_srs = detrend(anomaly_srs, axis=0, type='linear')
 
-sys.exit()
 #Calculate EOFs
-print "\nCalculating EOFs..."
-t1 = time()
-tmp_spat = np.copy(anomaly_srs.T, order='C')
-eofs, eig_vals, var_pct = st.calcEOF(tmp_spat, neigs)
-dur = time() - t1
-print "Done! (Completed in %.1f s)" % dur
-eof_proj = np.dot(eofs.T, tmp_spat)
-del tmp_spat
-print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
+#print "\nCalculating EOFs..."
+#t1 = time()
+#tmp_spat = np.copy(anomaly_srs.T, order='C')
+#eofs, eig_vals, var_pct = st.calcEOF(tmp_spat, neigs)
+#dur = time() - t1
+#print "Done! (Completed in %.1f s)" % dur
+#eof_proj = np.dot(eofs.T, tmp_spat)
+#del tmp_spat
+#print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
 
 #Start running trials for LIM forecasts
-time_dim = eof_proj.shape[1] - forecast_tlim
-tsample = int(time_dim*0.9)
-forecasts = np.zeros( [num_trials, forecast_tlim+1, neigs, (time_dim - tsample)] )
-fcast_idxs = np.zeros ((num_trials, (time_dim - tsample)), dtype=np.int16)
+fcast_times = np.array([x*12 for x in range(forecast_tlim+1)], dtype=np.int16)
+sample_tdim = old_shp[0] - forecast_tlim*12  #Size of useable time series for forecasting
+obs_use[1] -= forecast_tlim*12
+hold_chunk = int(ceil(sample_tdim/12*0.1))  # Size(yr) of chunk to withhold for testing
+train_tdim = sample_tdim - hold_chunk*12   # Size of training time series
+forecasts = np.zeros( [num_trials, forecast_tlim+1, neigs, (sample_tdim - train_tdim)] )
+withhold_start = np.arange(sample_tdim)
 
-for i in range(num_trials):
-    print 'Running trial %i' % (i+1)
-    # randomize sample of indices for training and testing
-    rnd_idx = sample(xrange(time_dim), time_dim)
-    train_idx = np.array(rnd_idx[0:tsample])
-    indep_idx = np.array(rnd_idx[tsample:])
-    fcast_idxs[i] = indep_idx
+out.close()
+sys.exit()
+for trial in withhold_start:
+    print 'Running trial %i' % (trial+1)
+    
+    #create training and testing set
+    tsbot, tstop = (obs_use[0]+trial, obs_use[0]+trial+hold_chunk*12)
+    test_set = obs_data[tsbot-shaved[0]:tstop+shaved[1]].read()
+    train_set = np.concatenate( obs_data[(obs_use[0]-shaved[0]):tsbot].read(),
+                                obs_data[(tstop):obs_use[1]+shaved[1]].read(),
+                                axis=0 )
+    
+    #Calculate running mean 
+    train_mean = st.runMean(train_set, wsize, shaveYr=True)
+    test_mean = st.runMean(test_set, wsize, shaveYr=True)
+    
+    #Anomalize
+    #climo = 
 
     # forecast for each time
     for tau in range(forecast_tlim+1):
