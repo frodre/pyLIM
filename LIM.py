@@ -133,7 +133,7 @@ out_fcast = [ out.create_carray(fcast_grp, 'f%i' % i,
 
 t1 = time()
 for j,trial in enumerate(test_start_idx):
-    print 'Running trial %i' % (trial+1)
+    print 'Running trial %i' % (j+1)
     
     #create training and testing set
     tsbot, tstop = (obs_use[0]+trial, obs_use[0]+trial+test_tdim)
