@@ -78,8 +78,8 @@ def runMean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
         result = np.zeros(new_shape, dtype=data.dtype)
         
     for i in xrange(new_shape[0]):
-        if i % 100 == 0:
-            print 'Calc for index %i' % i
+        #if i % 100 == 0:
+        #    print 'Calc for index %i' % i
         cntr = cut_from_bot - bedge + i
         result[i] = (data[(cntr):(cntr+window_size)].sum(axis=0) / 
                         float(window_size))

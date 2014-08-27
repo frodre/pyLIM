@@ -3,7 +3,7 @@ A simple collection of tests for various operations performed in pyLIM
 
 """
 
-import numpy
+import numpy as np
 
 
 def reshapeTest(data):
@@ -34,3 +34,8 @@ def reshapeTest(data):
         if not (tmp_map==reshaped_map).all():
             return False
     return True 
+    
+def runMeanTest():
+    import Stats as st
+    
+    tmp = np.random.random( 30 )

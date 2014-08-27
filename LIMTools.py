@@ -65,7 +65,7 @@ def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
                 
     return evarMatr
     
-def climo_var(data, yrsize):
+def climo(data, yrsize):
     old_shp = data.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
     climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
