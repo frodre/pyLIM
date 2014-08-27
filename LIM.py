@@ -26,10 +26,9 @@ from LIMTools import climo
 wsize = 12          # window size for running average
 yrsize = 12         # number of elements in year
 var_name = 'air'    # variable name in netcdf file
-neigs = 30          # number of eof compontents to retain
-num_trials = 40     # number of lim trials to run
+neigs = 25          # number of eof compontents to retain
+num_trials = 10     # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
-NCO = False         # use NetCDF Operators Flag 
 detrend_data=True   # linearly detrend the observations
 
 # Check os, use appropriate data files
@@ -118,26 +117,27 @@ if detrend_data:
 #print "\nLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
 
 #Start running trials for LIM forecasts
-fcast_times = np.array([x*12 for x in range(forecast_tlim+1)], dtype=np.int16)
-sample_tdim = old_shp[0] - forecast_tlim*12  #Size of useable time series for forecasting
-hold_chunk = int(ceil(sample_tdim/12*0.1))  # Size(yr) of chunk to withhold for testing
-train_tdim = sample_tdim - hold_chunk*12   # Size of training time series
+fcast_times = np.array([x*yrsize for x in range(forecast_tlim+1)], dtype=np.int16)
+fcast_tdim = fcast_times[-1]                   # Size of tail necessary to make forecasts
+sample_tdim = old_shp[0] - fcast_tdim          # Size of useable time series for forecasting
+hold_chunk = int(ceil(sample_tdim/12*0.1))     # Size(yr) of chunk to withhold for testing
+test_tdim = hold_chunk*12                      # Size of testing time series
+train_tdim = sample_tdim - test_tdim           # Size of training time series
 forecasts = np.zeros( [num_trials, forecast_tlim+1, neigs, (sample_tdim - train_tdim)] )
-withhold_start = np.arange(sample_tdim, dtype='int32')
 
-for trial in withhold_start:
+t1 = time()
+for trial in xrange(num_trials):
     print 'Running trial %i' % (trial+1)
     
     #create training and testing set
-    tsbot, tstop = (obs_use[0]+trial, obs_use[0]+trial+hold_chunk*12)
-    test_set = obs_data[tsbot-bedge:tstop+tedge]
+    tsbot, tstop = (obs_use[0]+trial, obs_use[0]+trial+test_tdim)
     train_set = np.concatenate( (obs_data[(obs_use[0]-bedge):tsbot],
                                  obs_data[(tstop):obs_use[1]+tedge]),
                                axis=0 )
     
     #Calculate running mean 
     train_mean, b, t = st.runMean(train_set, wsize, shaveYr=True)
-    test_mean, b, t = st.runMean(test_set, wsize, shaveYr=True)
+    test_mean = run_mean[trial:(trial+test_tdim+fcast_tdim)]
 
     #Anomalize
     old_shp = train_mean.shape
@@ -154,25 +154,31 @@ for trial in withhold_start:
         test_anom = detrend(test_anom, axis=0, type='linear')
     
     #EOFS
+    print "\tCalculating EOFs..."
     eofs, eig_vals, var_pct = st.calcEOF(train_anom.T, neigs)
     print "\tLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
     train_eof_proj = np.dot(eofs.T, train_anom.T)
     test_eof_proj = np.dot(eofs.T, test_anom.T)
     
     # forecast for each time
-    for tau in fcast_times:
-        x0 = eof_proj[:,train_idx]
-        xt = eof_proj[:,(train_idx + tau)]
+    print "\tPerforming forecasts..."
+    for i,tau in enumerate(fcast_times):
+        x0 = train_eof_proj[:,0:train_tdim]
+        xt = train_eof_proj[:,tau:(train_tdim + tau)]
         xtx0 = np.dot(xt,x0.T) 
         x0x0 = np.dot(x0, x0.T)
         M = np.dot(xtx0, np.linalg.pinv(x0x0))
 
         # use independent data to make forecast
-        x0i = eof_proj[:,indep_idx]
-        xti = eof_proj[:,(indep_idx + tau)]
+        x0i = test_eof_proj[:,0:test_tdim]
+        xti = test_eof_proj[:,tau:(test_tdim+tau)]
         xfi = np.dot(M, x0i)
-        forecasts[i, tau] = xfi
-
+        forecasts[trial, i] = xfi
+t2 = time()
+dur = t2 - t1
+print '%i trials finished in %f s'  % (num_trials, dur)
+out.close()
+sys.exit()
 #### STORE RESULTS ####
 out.create_carray(out.root.data, 'forecasts',
                   atom = tb.Atom.from_dtype( forecasts.dtype ),
