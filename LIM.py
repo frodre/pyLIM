@@ -120,7 +120,7 @@ sample_tdim = old_shp[0] - fcast_tdim          # Size of useable time series for
 hold_chunk = int(ceil(sample_tdim/12*0.1))     # Size(yr) of chunk to withhold for testing
 test_tdim = hold_chunk*12                      # Size of testing time series
 train_tdim = sample_tdim - test_tdim           # Size of training time series
-fcast_shp = [sample_tdim*test_tdim, old_shp[1]]
+fcast_shp = [num_trials*test_tdim, old_shp[1]]
 test_start_idx = np.linspace(0, sample_tdim, num_trials).astype(np.int16)
 
 #Create individual forecast time arrays for trials to be stored
@@ -132,7 +132,7 @@ out_fcast = [ out.create_carray(fcast_grp, 'f%i' % i,
               for i in xrange(len(fcast_times)) ]
 
 t1 = time()
-for j,trial in enumerate(test_start_idx):#sample_tdim):
+for j,trial in enumerate(test_start_idx):
     print 'Running trial %i' % (trial+1)
     
     #create training and testing set
