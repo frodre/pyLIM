@@ -6,6 +6,7 @@ Toolbox for statistical methods.
 import numpy as np
 import tables as tb
 from scipy.sparse.linalg import eigs
+from math import ceil
 
 def runMean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
     """
@@ -40,15 +41,18 @@ def runMean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
                                           "dimension of the data.")
     if shaveYr:
         tedge = window_size/2
-        cut_from_top = tedge + yrsize - tedge%yrsize
+        cut_from_top = yrsize*int(ceil(tedge/12.0))
         bedge = (window_size/2) + (window_size%2) - 1
-        cut_from_bot = bedge + yrsize - bedge%yrsize
+        cut_from_bot = yrsize*int(ceil(bedge/12.0))
     else:
         cut_from_top = window_size/2
         bedge = cut_from_bot = (window_size/2) + (window_size%2) - 1
     tot_cut = cut_from_top + cut_from_bot
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
+    
+    assert(new_shape[0] > 0), ("Not enough data to trim partial years from "
+                                "edges.  Please try with shaveYr=False")
 
     if h5_file is not None:
         is_h5 = True
