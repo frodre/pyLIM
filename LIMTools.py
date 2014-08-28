@@ -198,12 +198,12 @@ def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
     
 
 if __name__ == "__main__":
-    outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
+    #outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
+    outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
-    fcasts = h5file.root.data.forecasts.read()
-    eofs = h5file.root.data.eofs.read()
+    fcasts = h5file.root.data.fcast_bin.f1.read()
+    test_tidxs = h5file.root.data.test_idxs.read()
     shp_anom = h5file.root.data.anomaly_srs.read()
-    idxs = h5file.root.data.fcast_idxs.read()
     #result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
     #result.to_hdf('fcast_corr.h5', 'w')
     result = fcast_ce(fcasts, eofs, shp_anom, idxs)

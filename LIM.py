@@ -121,8 +121,14 @@ hold_chunk = int(ceil(sample_tdim/12*0.1))     # Size(yr) of chunk to withhold f
 test_tdim = hold_chunk*12                      # Size of testing time series
 train_tdim = sample_tdim - test_tdim           # Size of training time series
 fcast_shp = [num_trials*test_tdim, old_shp[1]]
+
 test_start_idx = np.linspace(0, train_tdim-1, num_trials).astype(np.int16)
 test_start_idx = np.unique(test_start_idx)
+out_test_idxs = out.create_carray(data_grp, 'test_idxs',
+                            atom=tb.Atom.from_dtype(test_start_idx.dtype),
+                            shape=test_start_idx.shape,
+                            title='Obs_run_mean Starting indicies for Test data')
+out_test_idxs[:] = test_start_idx
 
 #Create individual forecast time arrays for trials to be stored
 fcast_grp = out.create_group(data_grp, 'fcast_bin')
