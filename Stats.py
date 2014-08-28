@@ -4,7 +4,9 @@ Toolbox for statistical methods.
 """
 
 import numpy as np
+import numexpr as ne
 import tables as tb
+import pandas as pd
 from scipy.sparse.linalg import eigs
 from math import ceil
 
@@ -108,11 +110,47 @@ def calcEOF(data, num_eigs, retPCs = False):
     Returns
     -------
 
-    """
+    """ #TODO: Finish returns
     
     eofs, E, pcs = np.linalg.svd(data, full_matrices=False)
     eig_vals = (E ** 2) / (len(E) - 1.)
     tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
 
     return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
+    
+def calcCE(fcast, obs):
+    """
+    Method to calculate the Coefficient of Efficiency as defined by Nash and
+    Sutcliffe 1970.
+    
+    Parameters
+    ----------
+    fcast: ndarray
+        Time series of forecast data. M x N where M is the temporal dimension.
+    obs: ndarray
+        Time series of observations. M x N
+    """ #TODO: Finish returns
+     
+    cvar = obs.var(axis=0)
+    error = ne.evaluate('obs**2 - fcast*obs + fcast**2')
+    evar = error.sum(axis=0)/(len(error))
+    return 1 - evar/cvar
+    
+def calcLCA(fcast, obs):
+    """
+    Method to calculate the Local Anomaly Correlation (LCA).  Utilizes pandas
+    to perform the correlation calculation.
+    
+    Parameters
+    ----------
+    fcast: ndarray
+        Time series of forecast data. M x N where M is the temporal dimension.
+    obs: ndarray
+        Time series of observations. M x N
+    """
+    
+    df1 = pd.DataFrame(fcast)
+    df2 = pd.DataFrame(obs)
+    return df1.corrwith(df2).values
+    
 

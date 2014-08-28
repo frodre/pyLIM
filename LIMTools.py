@@ -3,47 +3,69 @@ import pandas as pd
 import tables as tb
 import numpy as np
 import numexpr as ne
+import Stats as st
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
 import matplotlib.cm as cm
 
 
-def fcast_corr(fcast_data, eof_data, obs, obs_tidxs, outfile):
-    ntrials = fcast_data.shape[0]
-    nlocs = eof_data.shape[0]
-    tslice = fcast_data.shape[3]
-    nfcasts = fcast_data.shape[1]
-    dshape = (ntrials*tslice, nlocs)
-    tmp = np.zeros( dshape )
-    true_state = np.zeros( dshape )
-    corrDf = None    
+def fcast_corr(h5file):
+    h5_datagrp = h5file.root.data
+    obs = h5_datagrp.anomaly_srs.read()
+    test_start_idxs = h5_datagrp.test_idxs.read()
+    yrsize = h5_datagrp.fcast_bin._v_attrs.yrsize
+    test_tdim = h5_datagrp.fcast_bin._v_attrs.test_tdim
+    nfcasts = h5_datagrp.fcast_bin._v_nchildren
+    try:
+        corrs = h5file.create_carray(h5file.root.stats, 'corr',
+                                     atom=tb.Atom.from_dtype(obs.dtype),
+                                     shape=(nfcasts, obs.shape[1]),
+                                     title="Local Anomaly Correlations",
+                                     createparents=True)
+    except tb.NodeError:
+        h5file.remove_node(h5file.root.stats, 'corr')
+        corrs = h5file.create_carray(h5file.root.stats, 'corr',
+                                     atom=tb.Atom.from_dtype(obs.dtype),
+                                     shape=(nfcasts, obs.shape[1]),
+                                     title="Local Anomaly Correlations",
+                                     createparents=True)
+    except tb.FileModeError:
+        corrs = np.zeros((nfcasts, obs.shape[1]))
     
-    for tau in xrange(nfcasts):
-        print 'Forecast #%i' % tau
-        for i in xrange(ntrials):
-            ii = i*tslice
-            true_state[ii:ii+tslice, :] = obs[(obs_tidxs[i]+tau), :]
-        for trial in xrange(ntrials):
-            j = trial*tslice
-            tmp[j:j+tslice, :] = np.dot(eof_data, fcast_data[trial, tau]).T
-            
-        df1 = pd.DataFrame(true_state)
-        df2 = pd.DataFrame(tmp)
-        corr = df1.corrwith(df2)
-        
-        if corrDf is not None:
-            corrDf = pd.concat([corrDf,corr], axis=1)
-        else:
-            corrDf = corr
-            
-    corrDf = corrDf.transpose()
-    corrDf = corrDf.reset_index(drop=True)        
-    return corrDf
+    for i,fcast in enumerate(h5file.list_nodes(h5_datagrp.fcast_bin)):
+        compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
+        corrs[i] = st.calcLCA(fcast, compiled_obs)
+    
+    return corrs
     
 def fcast_ce(fcast_data, obs, climo_var): 
-    error = ne.evaluate('obs**2 - fcast_data*obs + fcast_data**2')
-    evar = error.sum(axis=0)/(len(error))
-    return 1 - evar/climo_var
+    h5_datagrp = h5file.root.data
+    obs = h5_datagrp.anomaly_srs.read()
+    test_start_idxs = h5_datagrp.test_idxs.read()
+    yrsize = h5_datagrp.fcast_bin._v_attrs.yrsize
+    test_tdim = h5_datagrp.fcast_bin._v_attrs.test_tdim
+    nfcasts = h5_datagrp.fcast_bin._v_nchildren
+    try:
+        ces = h5file.create_carray(h5file.root.stats, 'ce',
+                                     atom=tb.Atom.from_dtype(obs.dtype),
+                                     shape=(nfcasts, obs.shape[1]),
+                                     title="Coefficient of Efficiency",
+                                     createparents=True)
+    except tb.NodeError:
+        h5file.remove_node(h5file.root.stats, 'ces')
+        ces = h5file.create_carray(h5file.root.stats, 'ces',
+                                     atom=tb.Atom.from_dtype(obs.dtype),
+                                     shape=(nfcasts, obs.shape[1]),
+                                     title="Coefficient of Efficiency",
+                                     createparents=True)
+    except tb.FileModeError:
+        ces = np.zeros((nfcasts, obs.shape[1]))
+    
+    for i,fcast in enumerate(h5file.list_nodes(h5_datagrp.fcast_bin)):
+        compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
+        ces[i] = st.calcLCA(fcast, compiled_obs)
+    
+    return ces
     
 def climo(data, yrsize):
     old_shp = data.shape
@@ -51,14 +73,14 @@ def climo(data, yrsize):
     climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
     return climo
     
-def build_obs(obs, start_idxs, fcast_yr, test_dim, yrsize):     
-    obs_data = np.zeros( (len(start_idxs)*test_dim, obs.shape[1]) )
+def build_obs(obs, start_idxs, tau, test_dim):     
+    obs_data = np.zeros( (len(start_idxs)*test_dim, obs.shape[1]),
+                          dtype = obs.dtype)
     
     for i,idx in enumerate(start_idxs):
         start = i*test_dim
         end = i*test_dim + test_dim
-        fcast_shift = fcast_yr*yrsize
-        obs_data[start:end] = obs[idx+fcast_shift:idx+fcast_shift+test_dim]
+        obs_data[start:end] = obs[idx+tau:idx+tau+test_dim]
         
     return obs_data
 
