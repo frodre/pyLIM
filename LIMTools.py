@@ -1,3 +1,4 @@
+import sys
 import pandas as pd
 import tables as tb
 import numpy as np
@@ -39,37 +40,27 @@ def fcast_corr(fcast_data, eof_data, obs, obs_tidxs, outfile):
     corrDf = corrDf.reset_index(drop=True)        
     return corrDf
     
-def fcast_ce(fcast_data, eof_data, obs, obs_tidxs):
-    ntrials = fcast_data.shape[0]
-    nlocs = eof_data.shape[0]
-    tslice = fcast_data.shape[3]
-    nfcasts = fcast_data.shape[1]
-    dshape = (ntrials*tslice, nlocs)
-    tmp = np.zeros( dshape )
-    true_state = np.zeros( dshape )
-    evarMatr = np.zeros( (nfcasts, nlocs) )
-    cvar = obs.var(axis=0)
-            
-    for tau in xrange(nfcasts):
-        print 'Forecast #%i' % tau
-        for i in xrange(ntrials):
-            ii = i*tslice
-            true_state[ii:ii+tslice, :] = obs[(obs_tidxs[i]+tau), :]
-        for trial in xrange(ntrials):
-            j = trial*tslice
-            tmp[j:j+tslice, :] = np.dot(eof_data, fcast_data[trial, tau]).T
-        error = ne.evaluate('true_state**2 - tmp*true_state + tmp**2')
-        evar = error.sum(axis=0)/(len(error))
-        ce = 1 - evar/cvar
-        evarMatr[tau,:] = ce
-                
-    return evarMatr
+def fcast_ce(fcast_data, obs, climo_var): 
+    error = ne.evaluate('obs**2 - fcast_data*obs + fcast_data**2')
+    evar = error.sum(axis=0)/(len(error))
+    return 1 - evar/climo_var
     
 def climo(data, yrsize):
     old_shp = data.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
     climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
     return climo
+    
+def build_obs(obs, start_idxs, fcast_yr, test_dim, yrsize):     
+    obs_data = np.zeros( (len(start_idxs)*test_dim, obs.shape[1]) )
+    
+    for i,idx in enumerate(start_idxs):
+        start = i*test_dim
+        end = i*test_dim + test_dim
+        fcast_shift = fcast_yr*yrsize
+        obs_data[start:end] = obs[idx+fcast_shift:idx+fcast_shift+test_dim]
+        
+    return obs_data
 
     
 ####  PLOTTING FUNCTIONS  ####
@@ -109,7 +100,8 @@ def plot_cedata(lats, lons, data, title, outfile):
     m.contourf(lons, lats, data, latlon=True, cmap=color, levels=contourlev)
     m.colorbar()
     plt.title(title)
-    plt.savefig(outfile, format='png')
+    plt.show()
+    #plt.savefig(outfile, format='png')
     
 def plot_vstau(fcast_data, eof_data, obs, obs_tidxs, loc, title, outfile):
     fcast_tlim = fcast_data.shape[1]
@@ -198,12 +190,18 @@ def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
     
 
 if __name__ == "__main__":
-    #outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
-    outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
+    outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
+    #outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
     fcasts = h5file.root.data.fcast_bin.f1.read()
     test_tidxs = h5file.root.data.test_idxs.read()
     shp_anom = h5file.root.data.anomaly_srs.read()
+    test_tdim = h5file.root.data.fcast_bin._v_attrs.test_tdim
+    yrsize = h5file.root.data.fcast_bin._v_attrs.yrsize
+    obs = build_obs(shp_anom, test_tidxs, 1, test_tdim, yrsize)
+    h5file.close()
+    sys.exit()
+    
     #result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
     #result.to_hdf('fcast_corr.h5', 'w')
     result = fcast_ce(fcasts, eofs, shp_anom, idxs)

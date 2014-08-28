@@ -27,7 +27,7 @@ wsize = 12          # window size for running average
 yrsize = 12         # number of elements in year
 var_name = 'air'    # variable name in netcdf file
 neigs = 25          # number of eof compontents to retain
-num_trials = 5      # number of lim trials to run
+num_trials = 50     # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
 detrend_data=True   # linearly detrend the observations
 
@@ -132,6 +132,8 @@ out_test_idxs[:] = test_start_idx
 
 #Create individual forecast time arrays for trials to be stored
 fcast_grp = out.create_group(data_grp, 'fcast_bin')
+fcast_grp._v_attrs.test_tdim = test_tdim
+fcast_grp._v_attrs.yrsize = yrsize
 out_fcast = [ out.create_carray(fcast_grp, 'f%i' % i, 
                                 atom=tb.Atom.from_dtype(np.dtype('float32')),
                                 shape = fcast_shp,
