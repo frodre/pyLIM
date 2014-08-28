@@ -152,21 +152,16 @@ for j,trial in enumerate(test_start_idx):
     
     #Calculate running mean 
     train_mean, b, t = st.runMean(train_set, wsize, shaveYr=True)
-    test_mean = run_mean[trial:(trial+test_tdim+fcast_tdim)]
 
     #Anomalize
     old_shp = train_mean.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
     train_climo = climo(train_mean, yrsize)
     train_anom = (train_mean.reshape(new_shp) - train_climo).reshape(old_shp)
-
-    old_shp = test_mean.shape
-    new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
-    test_anom = (test_mean.reshape(new_shp) - train_climo).reshape(old_shp)
+    test_anom = anomaly_srs[trial:(trial+test_tdim+fcast_tdim)]
     
     if detrend_data:
         train_anom = detrend(train_anom, axis=0, type='linear')
-        test_anom = detrend(test_anom, axis=0, type='linear')
     
     #EOFS
     print "\tCalculating EOFs..."
