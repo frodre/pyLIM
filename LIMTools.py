@@ -1,4 +1,4 @@
-import sys
+import os
 import pandas as pd
 import tables as tb
 import numpy as np
@@ -17,14 +17,14 @@ def fcast_corr(h5file):
     test_tdim = h5_datagrp.fcast_bin._v_attrs.test_tdim
     nfcasts = h5_datagrp.fcast_bin._v_nchildren
     try:
-        corrs = h5file.create_carray(h5file.root.stats, 'corr',
+        corrs = h5file.create_carray('/stats', 'corr',
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Local Anomaly Correlations",
                                      createparents=True)
     except tb.NodeError:
         h5file.remove_node(h5file.root.stats, 'corr')
-        corrs = h5file.create_carray(h5file.root.stats, 'corr',
+        corrs = h5file.create_carray('/stats', 'corr',
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Local Anomaly Correlations",
@@ -32,9 +32,10 @@ def fcast_corr(h5file):
     except tb.FileModeError:
         corrs = np.zeros((nfcasts, obs.shape[1]))
     
-    for i,fcast in enumerate(h5file.list_nodes(h5_datagrp.fcast_bin)):
+    fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
+    for i,fcast in enumerate(fcasts):
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
-        corrs[i] = st.calcLCA(fcast, compiled_obs)
+        corrs[i] = st.calcLCA(fcast.read(), compiled_obs)
     
     return corrs
     
@@ -46,24 +47,25 @@ def fcast_ce(fcast_data, obs, climo_var):
     test_tdim = h5_datagrp.fcast_bin._v_attrs.test_tdim
     nfcasts = h5_datagrp.fcast_bin._v_nchildren
     try:
-        ces = h5file.create_carray(h5file.root.stats, 'ce',
+        ces = h5file.create_carray('/stats', 'ce',
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Coefficient of Efficiency",
                                      createparents=True)
     except tb.NodeError:
         h5file.remove_node(h5file.root.stats, 'ces')
-        ces = h5file.create_carray(h5file.root.stats, 'ces',
+        ces = h5file.create_carray('/stats', 'ces',
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Coefficient of Efficiency",
                                      createparents=True)
     except tb.FileModeError:
         ces = np.zeros((nfcasts, obs.shape[1]))
-    
-    for i,fcast in enumerate(h5file.list_nodes(h5_datagrp.fcast_bin)):
+
+    fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
+    for i,fcast in enumerate(fcasts):
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
-        ces[i] = st.calcLCA(fcast, compiled_obs)
+        ces[i] = st.calcLCA(fcast.read(), compiled_obs)
     
     return ces
     
@@ -212,29 +214,15 @@ def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
     
 
 if __name__ == "__main__":
-    outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
-    #outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
+    if os.name == 'nt':
+        outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
+    else:
+        outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
-    fcasts = h5file.root.data.fcast_bin.f1.read()
-    test_tidxs = h5file.root.data.test_idxs.read()
-    shp_anom = h5file.root.data.anomaly_srs.read()
-    test_tdim = h5file.root.data.fcast_bin._v_attrs.test_tdim
-    yrsize = h5file.root.data.fcast_bin._v_attrs.yrsize
-    obs = build_obs(shp_anom, test_tidxs, 1, test_tdim, yrsize)
-    h5file.close()
-    sys.exit()
-    
-    #result = fcast_corr(fcasts, eofs, shp_anom, idxs, 'hi')
-    #result.to_hdf('fcast_corr.h5', 'w')
-    result = fcast_ce(fcasts, eofs, shp_anom, idxs)
     try:
-        h5file.create_group(h5file.root, 'stats')
-    except tb.NodeError:
-        pass    
-    dset = h5file.create_carray(h5file.root.stats, 'ce', 
-                                atom = tb.Atom.from_dtype(result.dtype),
-                                shape = result.shape)
-    dset[:] = result
-    h5file.close()
+        corr = fcast_corr(h5file)
+        ce = fcast_ce(h5file)
+    finally:
+        h5file.close()
     
         
