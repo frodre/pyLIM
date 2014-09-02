@@ -34,12 +34,13 @@ def fcast_corr(h5file):
     
     fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
     for i,fcast in enumerate(fcasts):
+        print 'Calculating LCA: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
         corrs[i] = st.calcLCA(fcast.read(), compiled_obs)
     
     return corrs
     
-def fcast_ce(fcast_data, obs, climo_var): 
+def fcast_ce(h5file): 
     h5_datagrp = h5file.root.data
     obs = h5_datagrp.anomaly_srs.read()
     test_start_idxs = h5_datagrp.test_idxs.read()
@@ -53,8 +54,8 @@ def fcast_ce(fcast_data, obs, climo_var):
                                      title="Coefficient of Efficiency",
                                      createparents=True)
     except tb.NodeError:
-        h5file.remove_node(h5file.root.stats, 'ces')
-        ces = h5file.create_carray('/stats', 'ces',
+        h5file.remove_node(h5file.root.stats, 'ce')
+        ces = h5file.create_carray('/stats', 'ce',
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Coefficient of Efficiency",
@@ -64,6 +65,7 @@ def fcast_ce(fcast_data, obs, climo_var):
 
     fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
     for i,fcast in enumerate(fcasts):
+        print 'Calculating CE: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
         ces[i] = st.calcLCA(fcast.read(), compiled_obs)
     
@@ -75,7 +77,7 @@ def climo(data, yrsize):
     climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
     return climo
     
-def build_obs(obs, start_idxs, tau, test_dim):     
+def build_obs(obs, start_idxs, tau, test_dim, h5f=None):     
     obs_data = np.zeros( (len(start_idxs)*test_dim, obs.shape[1]),
                           dtype = obs.dtype)
     
@@ -116,16 +118,15 @@ def plot_cedata(lats, lons, data, title, outfile):
     
     if data.min() < 0:
         color = cm.bwr
-        neglev = np.linspace(data.min(), 0, 10)
-        contourlev = np.concat(neglev, contourlev)
+        neglev = np.linspace(-1, 0, 11)
+        contourlev = np.concatenate((neglev, contourlev))
     else:
         color = cm.OrRd
         
-    m.contourf(lons, lats, data, latlon=True, cmap=color, levels=contourlev)
+    m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=-1, vmax=1)
     m.colorbar()
     plt.title(title)
-    plt.show()
-    #plt.savefig(outfile, format='png')
+    plt.savefig(outfile, format='png')
     
 def plot_vstau(fcast_data, eof_data, obs, obs_tidxs, loc, title, outfile):
     fcast_tlim = fcast_data.shape[1]
@@ -220,7 +221,7 @@ if __name__ == "__main__":
         outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
     try:
-        corr = fcast_corr(h5file)
+        #corr = fcast_corr(h5file)
         ce = fcast_ce(h5file)
     finally:
         h5file.close()

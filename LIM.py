@@ -27,7 +27,7 @@ wsize = 12          # window size for running average
 yrsize = 12         # number of elements in year
 var_name = 'air'    # variable name in netcdf file
 neigs = 25          # number of eof compontents to retain
-num_trials = 50     # number of lim trials to run
+num_trials = 139    # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
 detrend_data=True   # linearly detrend the observations
 
