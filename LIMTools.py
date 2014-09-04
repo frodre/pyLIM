@@ -36,6 +36,7 @@ def fcast_corr(h5file):
     for i,fcast in enumerate(fcasts):
         print 'Calculating LCA: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
+        fcast = fcast.read()
         corrs[i] = st.calcLCA(fcast.read(), compiled_obs)
     
     return corrs

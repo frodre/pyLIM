@@ -149,8 +149,17 @@ def calcLCA(fcast, obs):
         Time series of observations. M x N
     """
     
-    df1 = pd.DataFrame(fcast)
-    df2 = pd.DataFrame(obs)
-    return df1.corrwith(df2).values
+    f_mean = fcast.sum(axis=0) / float(fcast.shape[0])
+    o_mean = obs.sum(axis=0) / float(obs.shape[0])
+    cov = ne.evaluate('(fcast - f_mean) * (obs - o_mean)')
+    cov = cov.sum(axis=0)
+    f_std = ne.evaluate('fcast**2 - fcast*f_mean + f_mean**2')
+    f_std = np.sqrt(f_std.sum(axis=0))
+    o_std = ne.evaluate('obs**2 - obs*o_mean + o_mean**2')
+    o_std = np.sqrt(o_std.sum(axis=0))
+    std = f_std * o_std
+    
+    return cov / std
+    
     
 
