@@ -132,14 +132,17 @@ def calcCE(fcast, obs):
     """ #TODO: Finish returns
      
     cvar = obs.var(axis=0)
-    error = ne.evaluate('obs**2 - fcast*obs + fcast**2')
+    error = ne.evaluate('(obs - fcast)**2')
     evar = error.sum(axis=0)/(len(error))
     return 1 - evar/cvar
     
 def calcLCA(fcast, obs):
     """
-    Method to calculate the Local Anomaly Correlation (LCA).  Utilizes pandas
-    to perform the correlation calculation.
+    Method to calculate the Local Anomaly Correlation (LCA).
+    
+    Note: If necessary (memory concerns) in the future, the numexpr statements
+    can be extended to use pytable arrays.  Would need to provide means to 
+    function, as summing over the dataset is still very slow it seems. 
     
     Parameters
     ----------
@@ -153,9 +156,9 @@ def calcLCA(fcast, obs):
     o_mean = obs.sum(axis=0) / float(obs.shape[0])
     cov = ne.evaluate('(fcast - f_mean) * (obs - o_mean)')
     cov = cov.sum(axis=0)
-    f_std = ne.evaluate('fcast**2 - fcast*f_mean + f_mean**2')
+    f_std = ne.evaluate('(fcast - f_mean)**2')
     f_std = np.sqrt(f_std.sum(axis=0))
-    o_std = ne.evaluate('obs**2 - obs*o_mean + o_mean**2')
+    o_std = ne.evaluate('(obs - o_mean)**2')
     o_std = np.sqrt(o_std.sum(axis=0))
     std = f_std * o_std
     

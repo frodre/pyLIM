@@ -36,7 +36,6 @@ def fcast_corr(h5file):
     for i,fcast in enumerate(fcasts):
         print 'Calculating LCA: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
-        fcast = fcast.read()
         corrs[i] = st.calcLCA(fcast.read(), compiled_obs)
     
     return corrs
@@ -222,7 +221,7 @@ if __name__ == "__main__":
         outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
     try:
-        #corr = fcast_corr(h5file)
+        corr = fcast_corr(h5file)
         ce = fcast_ce(h5file)
     finally:
         h5file.close()
