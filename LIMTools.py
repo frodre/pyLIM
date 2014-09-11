@@ -6,8 +6,35 @@ import numexpr as ne
 import Stats as st
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
+from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
 
+#custom colormap information
+lb = tuple(np.array([150, 230, 255])/255.0)
+w = (1.0, 1.0, 1.0)
+yl = tuple(np.array([243, 237, 48])/255.0)
+rd = tuple(np.array([255, 50, 0])/255.0)
+dk = tuple(np.array([110,0,0])/255.0)
+
+cdict = {'red':     ((0.0, lb[0], lb[0]),
+                     (0.1, w[0], w[0]),
+                     (0.3, yl[0], yl[0]),
+                     (0.7, rd[0], rd[0]),
+                     (1.0, dk[0], dk[0])),
+
+         'green':   ((0.0, lb[1], lb[1]),
+                     (0.2, w[1], w[1]),
+                     (0.4, yl[1], yl[1]),
+                     (0.7, rd[1], rd[1]),
+                     (1.0, dk[1], dk[1])),
+
+         'blue':    ((0.0, lb[2], lb[2]),
+                     (0.2, w[2], w[2]),
+                     (0.4, yl[2], yl[2]),
+                     (0.7, rd[2], rd[2]),
+                     (1.0, dk[2], dk[2]))}
+
+newm = LinearSegmentedColormap('newman', cdict)
 
 def fcast_corr(h5file):
     h5_datagrp = h5file.root.data
@@ -98,7 +125,7 @@ def plot_corrdata(lats, lons, data, title, outfile):
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
-    color = cm.OrRd
+    color = newm
     color.set_under('#9acce5')
     m.contourf(lons, lats, data, latlon=True, cmap=color,
                vmin=0, levels = contourlev)
@@ -217,8 +244,10 @@ def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
 if __name__ == "__main__":
     if os.name == 'nt':
         outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
+        #outfile = 'G:\Hakim Research\pyLIM\Trend_LIM_data.h5'
     else:
-        outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
+        #outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
+        outfile = '/home/chaos2/wperkins/data/pyLIM/Trend_LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
     try:
         corr = fcast_corr(h5file)
