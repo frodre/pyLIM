@@ -155,6 +155,37 @@ def plot_cedata(lats, lons, data, title, outfile):
     plt.title(title)
     plt.savefig(outfile, format='png')
     
+def plot_spatial(lats, lons, data, title, outfile):
+    """
+    Method for basic spatial data plots.  Uses diverging color scheme, so 
+    current implementation is best for anomaly data.  Created initially just
+    to plot spatial EOFs
+    
+    Parameters
+    ----------
+    lats: ndarray
+        MxN matrix of latitude values
+    lons: ndarray
+        MxN matrix of longitude values
+    data: ndarray
+        MxN matrix of spatial data to plot
+    title: str
+        Title string for the plot
+    outfile: str
+        Filename to save the png image as
+    """
+
+    plt.close('all')
+    m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
+                llcrnrlon=0, urcrnrlon=360, resolution='c')
+    m.drawcoastlines()
+    color = cm.bwr
+    m.pcolor(lons, lats, data, latlon=True, cmap=color)
+    m.colorbar()
+    
+    plt.title(title)
+    plt.savefig(outfile, format='png')
+    
 def plot_vstau(fcast_data, eof_data, obs, obs_tidxs, loc, title, outfile):
     fcast_tlim = fcast_data.shape[1]
     evar = np.zeros(fcast_tlim)
@@ -202,39 +233,40 @@ def plot_vstime(obs, loc):
     runax.set_ylabel('Temp Anomaly (K)')
     runfig.show()
     
-def plot_vstrials(fcast_data, eof_data, obs, obs_tidxs, num_trials, loc):
-    lead_times = np.array([0, 1, 3, 6, 9, 12])*12
-    anom_truth = lambda x: np.array([obs.T[loc, (obs_tidxs[i] + x)] 
-                                      for i in range(len(obs_tidxs))])
-    true_var = np.array([anom_truth(tau).var() for tau in lead_times]) 
-    true_mean = np.array([anom_truth(tau).mean() for tau in lead_times])
+def plot_vstrials(fcast_data, obs, test_tidxs, test_tdim, tau, loc):
+    num_trials = fcast_data.shape[0]/test_tdim
+    anom_truth = build_obs(obs, test_tidxs, tau, test_tdim)
+    loc_tru_var = anom_truth[:,loc].var()
+    print loc_tru_var
+    loc_tru_mean = anom_truth[:,loc].mean()
     
-    fcast_var = np.zeros( (len(lead_times), num_trials) )
-    fcast_mean = np.zeros( fcast_var.shape )
+    fcast_var = np.zeros( num_trials )
+    fcast_mean = np.zeros( num_trials )
     
-    for i in range(len(lead_times)):
-        loc_fcast = np.array([np.dot(eof_data[loc], fcast[lead_times[i]]) 
-                              for fcast in fcast_data])
-        varis = np.zeros( len(loc_fcast) )
-        means = np.zeros( varis.shape )
-        for j in range(len(loc_fcast)):
-            varis[j] = loc_fcast[0:j+1].var() 
-            means[j] = loc_fcast[0:j+1].mean()
-        fcast_var[i,:] = varis
-        fcast_mean[i,:] = means
+    for i in xrange(num_trials):
+        end = i*test_tdim + test_tdim
+        fcast_var[i] = fcast_data[0:end, loc].var()
+        fcast_mean[i] = fcast_data[0:end, loc].mean()
     
     fig, ax = plt.subplots(2,1, sharex=True)
-    x = range(fcast_var.shape[1])
     
-    for i,var in enumerate(fcast_var):
-        ax[0].plot(x, var, linewidth=2, label='Lead Time = %i yr' % (lead_times[i]/12))
-        ax[0].legend()
-        ax[1].plot(x, fcast_mean[i], linewidth=2)
     
-    for line, var in zip(ax[0].get_lines(), true_var):
-        ax[0].axhline(y=var, linestyle = '--', color = line.get_color())
+    ax[0].plot(fcast_var, color='b', linewidth=2, label='Fcast Var')
+    ax[0].axhline(loc_tru_var, xmin=0, xmax=num_trials,
+                  linestyle='--', color='k', label='True Var')
+    ax[0].legend(loc=4)
+    ax[1].plot(fcast_mean, linewidth=2, label='Fcast Mean')
+    ax[1].axhline(loc_tru_mean, xmin=0, xmax=num_trials,
+                  linestyle='--', color='k', label='True Mean')
+    ax[1].legend()
     
-    ax[0].set_title('Forecast Variance & Mean vs. # Trials (Single Gridpoint)')
+    # Interesting case of line matching below here
+    #for line, var in zip(ax[0].get_lines(), true_var):
+    #    ax[0].axhline(y=var, linestyle = '--', color = line.get_color())
+    
+    ax[0].set_title('Forecast Variance & Mean vs. # Trials (Single Gridpoint)'
+                     ' Tau = %i' % tau)
+    ax[0].set_ylim(0,0.8)
     ax[1].set_xlabel('Trial #')
     ax[0].set_ylabel('Variance (K)')
     ax[1].set_ylabel('Mean (K)')
