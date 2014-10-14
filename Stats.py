@@ -138,7 +138,7 @@ def calcCE(fcast, obs):
     
 def calcLCA(fcast, obs):
     """
-    Method to calculate the Local Anomaly Correlation (LCA).
+    Method to calculate the Local Anomaly Correlation (LAC).
     
     Note: If necessary (memory concerns) in the future, the numexpr statements
     can be extended to use pytable arrays.  Would need to provide means to 
