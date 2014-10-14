@@ -26,7 +26,7 @@ from LIMTools import climo
 wsize = 12          # window size for running average
 yrsize = 12         # number of elements in year
 var_name = 'air'    # variable name in netcdf file
-neigs = 25          # number of eof compontents to retain
+neigs = 20          # number of eof compontents to retain
 num_trials = 139    # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
 detrend_data=True   # linearly detrend the observations
@@ -34,12 +34,12 @@ detrend_data=True   # linearly detrend the observations
 # Check os, use appropriate data files
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
-    output_loc = "G:\Hakim Research\pyLIM\LIM_data.h5"
+    output_loc = "G:\Hakim Research\pyLIM\Trend_LIM_data.h5"
     NCO = False  # cannot use NetCDF Ops on windows
 else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
     data_file = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
-    output_loc = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
+    output_loc = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
 
 
 #### LOAD DATA ####
@@ -110,7 +110,7 @@ if detrend_data:
 out_anom = out.create_carray(data_grp, 'anomaly_srs',
                              atom = tb.Atom.from_dtype(anomaly_srs.dtype),
                              shape = anomaly_srs.shape,
-                             title = 'Detrended Monthly Anomaly Timeseries')
+                             title = 'Monthly Anomaly Timeseries')
 out_anom[:] = anomaly_srs
 
 #Start running trials for LIM forecasts
@@ -163,12 +163,21 @@ for j,trial in enumerate(test_start_idx):
     if detrend_data:
         train_anom = detrend(train_anom, axis=0, type='linear')
     
+    #Area Weight for EOF calculation
+    latg, lon_g = np.meshgrid(lats, lons, indexing='ij')
+    scale = np.sqrt(np.cos(np.radians(latg)))
+    wgt_train_anom = train_anom * scale.reshape(train_anom.shape[1])
+    
     #EOFS
     print "\tCalculating EOFs..."
-    eofs, eig_vals, var_pct = st.calcEOF(train_anom.T, neigs)
-    print "\tLeading %i EOFS explain %f percent of the total variance" % (neigs, var_pct)
+    eofs, eig_vals, var_pct = st.calcEOF(wgt_train_anom.T, neigs)
+    print ("\tLeading %i EOFS explain %f percent of the total variance"
+            % (neigs, var_pct))
     train_eof_proj = np.dot(eofs.T, train_anom.T)
     test_eof_proj = np.dot(eofs.T, test_anom.T)
+    
+    if j==0:
+        np.save('eofs.npy', eofs)
     
     # forecast for each time
     print "\tPerforming forecasts..."
