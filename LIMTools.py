@@ -9,7 +9,7 @@ from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
 
-#custom colormap information
+#custom colormap information, trying to reproduce Newman
 lb = tuple(np.array([150, 230, 255])/255.0)
 w = (1.0, 1.0, 1.0)
 yl = tuple(np.array([243, 237, 48])/255.0)
@@ -61,7 +61,7 @@ def fcast_corr(h5file):
     
     fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
     for i,fcast in enumerate(fcasts):
-        print 'Calculating LCA: %i yr fcast' % i
+        print 'Calculating LAC: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
         corrs[i] = st.calcLCA(fcast.read(), compiled_obs)
     
@@ -155,7 +155,7 @@ def plot_cedata(lats, lons, data, title, outfile):
     plt.title(title)
     plt.savefig(outfile, format='png')
     
-def plot_spatial(lats, lons, data, title, outfile):
+def plot_spatial(lats, lons, data, title, outfile=None):
     """
     Method for basic spatial data plots.  Uses diverging color scheme, so 
     current implementation is best for anomaly data.  Created initially just
@@ -184,7 +184,10 @@ def plot_spatial(lats, lons, data, title, outfile):
     m.colorbar()
     
     plt.title(title)
-    plt.savefig(outfile, format='png')
+    if outfile is not None:
+        plt.savefig(outfile, format='png')
+    else:
+        plt.show()
     
 def plot_vstau(fcast_data, eof_data, obs, obs_tidxs, loc, title, outfile):
     fcast_tlim = fcast_data.shape[1]
@@ -279,7 +282,7 @@ if __name__ == "__main__":
         #outfile = 'G:\Hakim Research\pyLIM\Trend_LIM_data.h5'
     else:
         #outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
-        outfile = '/home/chaos2/wperkins/data/pyLIM/Trend_LIM_data.h5'
+        outfile = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
     try:
         corr = fcast_corr(h5file)
