@@ -6,8 +6,6 @@ Toolbox for statistical methods.
 import numpy as np
 import numexpr as ne
 import tables as tb
-import pandas as pd
-from scipy.sparse.linalg import eigs
 from math import ceil
 
 def runMean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):

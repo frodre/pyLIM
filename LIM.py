@@ -29,9 +29,12 @@ var_name = 'air'    # variable name in netcdf file
 neigs = 20          # number of eof compontents to retain
 num_trials = 139    # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
-detrend_data=True   # linearly detrend the observations
+detrend_data=False   # linearly detrend the observations
+global_eof=False    # calculate EOFs from entire grid rather than land vs. sea
 
 # Check os, use appropriate data files
+# mask_file should contain a global grid with land points as true(1) and
+#   sea points as false(0)
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
     output_loc = "G:\Hakim Research\pyLIM\Trend_LIM_data.h5"
@@ -39,7 +42,9 @@ if os.name == 'nt':
 else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
     data_file = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
-    output_loc = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
+    mask_file = '/home/chaos2/wperkins/data/20CR/land.nc'
+    output_loc = '/home/chaos2/wperkins/data/pyLIM/Trended_sepEOFs_LIM_data.h5'
+    
 
 
 #### LOAD DATA ####
@@ -48,6 +53,7 @@ f = ncf.netcdf_file(data_file, 'r')
 tvar = f.variables[var_name]
 lats = f.variables['lat'].data
 lons = f.variables['lon'].data
+lats, lons = np.meshgrid(lats, lons, indexing='ij')
 
 #account for data storage as int * scale + offset
 try:
@@ -56,17 +62,47 @@ try:
     tdata = tvar.data*sf + offset
 except AttributeError:
     tdata = tvar.data
-
+    
 #flatten t-data
 spatial_shp = tdata.shape[1:]
 tdata = tdata.reshape( (tdata.shape[0], np.product(spatial_shp)) )
+    
+#Perform data masking if not global_eof
+if not global_eof:
+    f_mask = ncf.netcdf_file(mask_file)
+    land_mask = f_mask.variables['land']
+    
+    try:
+        sf = land_mask.scale_factor
+        offset = land_mask.add_offset
+        land_mask = land_mask.data*sf + offset
+    except AttributeError:
+        land_mask = land_mask.data
+        
+    land_mask = land_mask.squeeze().astype(np.int16).flatten()
+    sea_mask = np.logical_not(land_mask)
+    
+    tiled_landmask = np.repeat(np.expand_dims(land_mask, 0),
+                               tdata.shape[0],
+                               axis=0 )
+    tiled_seamask = np.repeat(np.expand_dims(sea_mask, 0),
+                              tdata.shape[0],
+                              axis=0)
+                              
+    
+    
+    #Separate lat/lon coordinates into sea and land groups
+    #sea_lats = np.ma.masked_array(lats, land_mask).compressed()
+    #land_lats = np.ma.masked_array(lats, sea_mask).compressed()
+    #sea_lons = np.ma.masked_array(lons, land_mask).compressed()
+    #land_lons = np.ma.masked_array(lons, sea_mask).compressed()
 
 #save data to hdf5 file
 out = tb.open_file(output_loc, mode='w')
 data_grp = out.create_group(out.root,
                             'data', 
                             title = 'Observations & Forecast Data',
-                            filters = tb.Filters(complevel=4, complib='blosc'))
+                            filters = tb.Filters(complevel=2, complib='blosc'))
 trials_grp = out.create_group(data_grp, 'trials')
 obs_data = out.create_carray(data_grp, 'obs',
                                  atom = tb.Atom.from_dtype( tdata.dtype ),
@@ -164,20 +200,45 @@ for j,trial in enumerate(test_start_idx):
         train_anom = detrend(train_anom, axis=0, type='linear')
     
     #Area Weight for EOF calculation
-    latg, lon_g = np.meshgrid(lats, lons, indexing='ij')
-    scale = np.sqrt(np.cos(np.radians(latg)))
+    #latg, lon_g = np.meshgrid(lats, lons, indexing='ij')
+    scale = np.sqrt(np.cos(np.radians(lats)))
     wgt_train_anom = train_anom * scale.reshape(train_anom.shape[1])
     
-    #EOFS
-    print "\tCalculating EOFs..."
-    eofs, eig_vals, var_pct = st.calcEOF(wgt_train_anom.T, neigs)
-    print ("\tLeading %i EOFS explain %f percent of the total variance"
-            % (neigs, var_pct))
+    #EOF Calculation
+    if global_eof:  #Globaal EOFs
+        print "\tCalculating EOFs..."
+        eofs, eig_vals, var_pct = st.calcEOF(wgt_train_anom.T, neigs)
+        print ("\tLeading %i EOFS explain %f percent of the total variance"
+                % (neigs, var_pct))
+    else:
+        ocean = np.ma.masked_array(wgt_train_anom,
+                                   tiled_landmask[0:len(wgt_train_anom)]
+                                   ).filled(0)  #Extract masked array values
+        land = np.ma.masked_array(wgt_train_anom,
+                                  tiled_seamask[0:len(wgt_train_anom)]
+                                 ).filled(0)
+        nsea_eigs = neigs/2 + neigs%2
+        nland_eigs = neigs/2
+        
+        print "\tCalculating Ocean EOFs..."
+        sea_eofs, sea_eigs, sea_var = st.calcEOF(ocean.T, nsea_eigs)
+        print ("\t Leading %i sea EOFs explain %f percent of the total variance"
+                % (nsea_eigs, sea_var))
+                
+        print "\tCalculating Land EOFs..."
+        land_eofs, land_eigs, land_var = st.calcEOF(land.T, nland_eigs)
+        print ("\t Leading %i land EOFs explain %f percent of the total variance"
+                % (nland_eigs, land_var))
+        
+        if j == 0:        
+            np.save('land_eofs.npy', land_eofs)
+            np.save('sea_eofs.npy' , sea_eofs)
+        
+        eofs = np.concatenate( (sea_eofs, land_eofs), axis=1)
+
+    # Project data into EOF space
     train_eof_proj = np.dot(eofs.T, train_anom.T)
     test_eof_proj = np.dot(eofs.T, test_anom.T)
-    
-    if j==0:
-        np.save('eofs.npy', eofs)
     
     # forecast for each time
     print "\tPerforming forecasts..."

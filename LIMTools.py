@@ -5,6 +5,7 @@ import numpy as np
 import numexpr as ne
 import Stats as st
 import matplotlib.pyplot as plt
+import scipy.io.netcdf as ncf
 from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
@@ -98,11 +99,12 @@ def fcast_ce(h5file):
     
     return ces
     
-def climo(data, yrsize):
+def calc_anomaly(data, yrsize):
     old_shp = data.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
     climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
-    return climo
+    anomaly = data.reshape(new_shp) - climo
+    return anomaly.reshape(old_shp)
     
 def build_obs(obs, start_idxs, tau, test_dim, h5f=None):     
     obs_data = np.zeros( (len(start_idxs)*test_dim, obs.shape[1]),
@@ -115,6 +117,32 @@ def build_obs(obs, start_idxs, tau, test_dim, h5f=None):
         
     return obs_data
 
+def area_wgt(data, lats):
+    assert(data.shape[-1] == lats.shape[-1])
+    scale = np.sqrt(np.cos(np.radians(lats)))
+    return data * scale
+    
+def load_landsea_mask(maskfile, tile_len):
+    f_mask = ncf.netcdf_file(maskfile)
+    land_mask = f_mask.variables['land']
+    
+    try:
+        sf = land_mask.scale_factor
+        offset = land_mask.add_offset
+        land_mask = land_mask.data*sf + offset
+    except AttributeError:
+        land_mask = land_mask.data
+        
+    land_mask = land_mask.squeeze().astype(np.int16).flatten()
+    sea_mask = np.logical_not(land_mask)
+    
+    tiled_landmask = np.repeat(np.expand_dims(land_mask, 0),
+                               tile_len,
+                               axis=0 )
+    tiled_seamask = np.repeat(np.expand_dims(sea_mask, 0),
+                              tile_len,
+                              axis=0)
+    return (tiled_landmask, tiled_seamask)
     
 ####  PLOTTING FUNCTIONS  ####
     
@@ -174,13 +202,14 @@ def plot_spatial(lats, lons, data, title, outfile=None):
     outfile: str
         Filename to save the png image as
     """
-
-    plt.close('all')
+    plt.clf()
+    plt_range = np.max(np.abs(data))
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
     color = cm.bwr
-    m.pcolor(lons, lats, data, latlon=True, cmap=color)
+    m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=-plt_range,
+             vmax = plt_range)
     m.colorbar()
     
     plt.title(title)
@@ -282,7 +311,8 @@ if __name__ == "__main__":
         #outfile = 'G:\Hakim Research\pyLIM\Trend_LIM_data.h5'
     else:
         #outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
-        outfile = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
+        #outfile = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
+        outfile = '/home/chaos2/wperkins/data/pyLIM/Trended_sepEOFs_LIM_data.h5'
     h5file = tb.open_file(outfile, mode='a')
     try:
         corr = fcast_corr(h5file)
