@@ -116,7 +116,7 @@ def calcEOF(data, num_eigs, retPCs = False):
 
     return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
     
-def calcCE(fcast, obs):
+def calcCE(fcast, trial_obs, obs):
     """
     Method to calculate the Coefficient of Efficiency as defined by Nash and
     Sutcliffe 1970.
@@ -130,7 +130,7 @@ def calcCE(fcast, obs):
     """ #TODO: Finish returns
      
     cvar = obs.var(axis=0)
-    error = ne.evaluate('(obs - fcast)**2')
+    error = ne.evaluate('(trial_obs - fcast)**2')
     evar = error.sum(axis=0)/(len(error))
     return 1 - evar/cvar
     

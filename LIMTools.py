@@ -38,6 +38,7 @@ cdict = {'red':     ((0.0, lb[0], lb[0]),
 newm = LinearSegmentedColormap('newman', cdict)
 
 def fcast_corr(h5file):
+    leaf_name = 'corr_check'
     h5_datagrp = h5file.root.data
     obs = h5_datagrp.anomaly_srs.read()
     test_start_idxs = h5_datagrp.test_idxs.read()
@@ -45,14 +46,14 @@ def fcast_corr(h5file):
     test_tdim = h5_datagrp.fcast_bin._v_attrs.test_tdim
     nfcasts = h5_datagrp.fcast_bin._v_nchildren
     try:
-        corrs = h5file.create_carray('/stats', 'corr',
+        corrs = h5file.create_carray('/stats', leaf_name,
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Local Anomaly Correlations",
                                      createparents=True)
     except tb.NodeError:
-        h5file.remove_node(h5file.root.stats, 'corr')
-        corrs = h5file.create_carray('/stats', 'corr',
+        h5file.remove_node(h5file.root.stats, leaf_name)
+        corrs = h5file.create_carray('/stats', leaf_name,
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Local Anomaly Correlations",
@@ -65,10 +66,11 @@ def fcast_corr(h5file):
         print 'Calculating LAC: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
         corrs[i] = st.calcLCA(fcast.read(), compiled_obs)
-    
+
     return corrs
     
-def fcast_ce(h5file): 
+def fcast_ce(h5file):
+    leaf_name = 'ce_check' 
     h5_datagrp = h5file.root.data
     obs = h5_datagrp.anomaly_srs.read()
     test_start_idxs = h5_datagrp.test_idxs.read()
@@ -76,14 +78,14 @@ def fcast_ce(h5file):
     test_tdim = h5_datagrp.fcast_bin._v_attrs.test_tdim
     nfcasts = h5_datagrp.fcast_bin._v_nchildren
     try:
-        ces = h5file.create_carray('/stats', 'ce',
+        ces = h5file.create_carray('/stats', leaf_name,
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Coefficient of Efficiency",
                                      createparents=True)
     except tb.NodeError:
-        h5file.remove_node(h5file.root.stats, 'ce')
-        ces = h5file.create_carray('/stats', 'ce',
+        h5file.remove_node(h5file.root.stats, leaf_name)
+        ces = h5file.create_carray('/stats', leaf_name,
                                      atom=tb.Atom.from_dtype(obs.dtype),
                                      shape=(nfcasts, obs.shape[1]),
                                      title="Coefficient of Efficiency",
@@ -95,7 +97,18 @@ def fcast_ce(h5file):
     for i,fcast in enumerate(fcasts):
         print 'Calculating CE: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
-        ces[i] = st.calcLCA(fcast.read(), compiled_obs)
+        ces[i] = st.calcCE(fcast.read(), compiled_obs, obs)
+        
+        #ce_tmp = np.zeros( obs.shape[1] )
+        #for j, start_idx in enumerate(test_start_idxs):
+        #    compiled_obs = build_obs(obs, [start_idx], i*yrsize, test_tdim)
+        #    start = j*test_tdim
+        #    end = j*test_tdim + test_tdim
+        #    fcast_chunk = fcast[start:end]
+        #    ce_tmp += st.calcCE(fcast_chunk, compiled_obs, obs.var(axis=0))
+        #
+        #ces[i] = ce_tmp/len(test_start_idxs)
+        #print "Averaging, len %i, j %i" % (len(test_start_idxs), j+1)
     
     return ces
     
@@ -146,7 +159,8 @@ def load_landsea_mask(maskfile, tile_len):
     
 ####  PLOTTING FUNCTIONS  ####
     
-def plot_corrdata(lats, lons, data, title, outfile):
+def plot_corrdata(lats, lons, data, title, outfile=None):
+    plt.clf()
     contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
     cbticks = np.linspace(0,1,11)
     plt.close('all')
@@ -159,9 +173,13 @@ def plot_corrdata(lats, lons, data, title, outfile):
                vmin=0, levels = contourlev)
     m.colorbar(ticks=cbticks)
     plt.title(title)
-    plt.savefig(outfile, format='png')
+    
+    if outfile is not None:
+        plt.savefig(outfile, format='png')
+    else:
+        plt.show()
 
-def plot_cedata(lats, lons, data, title, outfile):
+def plot_cedata(lats, lons, data, title, outfile=None):
     #contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
     #cbticks = np.linspace(0,1,11)
     plt.close('all')
@@ -181,7 +199,10 @@ def plot_cedata(lats, lons, data, title, outfile):
     m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=-1, vmax=1)
     m.colorbar()
     plt.title(title)
-    plt.savefig(outfile, format='png')
+    if outfile is not None:
+        plt.savefig(outfile, format='png')
+    else:
+        plt.show()
     
 def plot_spatial(lats, lons, data, title, outfile=None):
     """
