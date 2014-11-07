@@ -11,7 +11,6 @@ Author: Andre Perkins
 """
 
 import os
-import sys
 import numpy as np
 import Stats as st
 import tables as tb
@@ -19,7 +18,6 @@ from math import ceil
 from scipy.io import netcdf as ncf
 from scipy.signal import detrend
 from time import time
-from random import sample
 from LIMTools import climo
 
 #### LIM PARAMETERS ####
