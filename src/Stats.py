@@ -8,7 +8,7 @@ import numexpr as ne
 import tables as tb
 from math import ceil
 
-def runMean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
+def run_mean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
     """
     A function for calculating the running mean on data.
 
@@ -90,7 +90,7 @@ def runMean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
     return (result, cut_from_bot, cut_from_top)
    
 
-def calcEOF(data, num_eigs, retPCs = False):
+def calc_EOFs(data, num_eigs, retPCs = False):
     """
     Method to calculate the EOFs of given  dataset.  This assumes data comes in as
     an m x n matrix where m is the spatial dimension and n is the sampling
@@ -116,7 +116,7 @@ def calcEOF(data, num_eigs, retPCs = False):
 
     return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
     
-def calcCE(fcast, trial_obs, obs):
+def calc_CE(fcast, trial_obs, obs):
     """
     Method to calculate the Coefficient of Efficiency as defined by Nash and
     Sutcliffe 1970.
@@ -134,7 +134,7 @@ def calcCE(fcast, trial_obs, obs):
     evar = error.sum(axis=0)/(len(error))
     return 1 - evar/cvar
     
-def calcLCA(fcast, obs):
+def calc_LAC(fcast, obs):
     """
     Method to calculate the Local Anomaly Correlation (LAC).
     
