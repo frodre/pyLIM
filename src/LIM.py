@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from numpy import sqrt, cos, radians, dot
+
 from Stats import calc_EOFs, run_mean
 from LIMTools import calc_anomaly
 
@@ -27,8 +29,9 @@ class LIM(object):
     """
     
     def __init__(self, calibration, wsize, fcast_times, fcast_num_PCs,
-                  H5file=None):
+                  area_wgt_lats=None, use_G=False, H5file=None):
         """
+        TODO UPDATE
         Parameters
         ----------
         calibration: ndarray
@@ -45,18 +48,51 @@ class LIM(object):
         """
         
         self._calibration = calibration
-        self.fcast_times = fcast_times
-        self._H5file = H5file
         self._wsize = wsize
+        self.fcast_times = fcast_times
+        self._neigs = fcast_num_PCs
+        self._lats = area_wgt_lats
+        self._use_G = use_G
+        self._H5file = H5file
         
-        _mean_srs, _bedge, _tedge = run_mean(self._calibration, 
+        self._mean_srs, _bedge, _tedge = run_mean(self._calibration, 
                                              self.wsize,
                                              self._H5file,
                                              shaveYr=True)
-        _obs_use = [_bedge, calibration.shape[0]-_tedge]
-        _anomaly_srs = calc_anomaly(_mean_srs, self.wsize)
+        self._obs_use = [_bedge, calibration.shape[0]-_tedge]
+        self._anomaly_srs = calc_anomaly(_mean_srs, self.wsize)
         
-    def forecast(t0_data):
+        del _mean_srs
+        
+    def _area_wgt(data, lats):
+        assert(data.shape[-1] == lats.shape[-1])
+        scale = sqrt(cos(radians(lats)))
+        return data * scale
+        
+    def _cnvt_EOF_space(data, neigs):
+        eofs, _, var_pct = calc_EOFs(data.T)
+        eof_proj = dot(eofs.T, data.T)
+        return (eof_proj, eofs)
+        
+    def _calc_M(data, tau_vals, use_G):
+        if use_G:
+            for i,tau in enumerate(tau_vals):
+                pass
+        else:
+            pass
+                
+         
+        
+    def forecast(self, t0_data, use_G = False):
+        train_data = self._cnvt_EOF_space(self._anomaly_srs, self._neigs)
+        
+        if not use_G:
+            train_tdim = train_data.shape[0] - self._wsize
+        else:
+            train_tdim = train_data.shape[0] - self.fcast_times[-1]
+        
+        
+        
         pass
         
     
