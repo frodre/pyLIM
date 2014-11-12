@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-from numpy import sqrt, cos, radians, dot
+from numpy import sqrt, cos, radians, dot, log, zeros
+from numpy.linalg import pinv
 
 from Stats import calc_EOFs, run_mean
 from LIMTools import calc_anomaly
@@ -55,14 +56,17 @@ class LIM(object):
         self._use_G = use_G
         self._H5file = H5file
         
-        self._mean_srs, _bedge, _tedge = run_mean(self._calibration, 
+        self._anomaly_srs, _bedge, _tedge = run_mean(self._calibration, 
                                              self.wsize,
                                              self._H5file,
                                              shaveYr=True)
         self._obs_use = [_bedge, calibration.shape[0]-_tedge]
-        self._anomaly_srs = calc_anomaly(_mean_srs, self.wsize)
+        self._anomaly_srs, self._climo = calc_anomaly(self._anomaly_srs,
+                                                      self.wsize)
         
-        del _mean_srs
+        # Use a 1-tau lag for calculating forecast variable L
+        if not use_G:
+            self._tau = wsize
         
     def _area_wgt(data, lats):
         assert(data.shape[-1] == lats.shape[-1])
@@ -74,25 +78,50 @@ class LIM(object):
         eof_proj = dot(eofs.T, data.T)
         return (eof_proj, eofs)
         
-    def _calc_M(data, tau_vals, use_G):
+    def _calc_M(x0, xt, tau, use_G):
+        x0x0 = dot(x0, x0.T)
+        x0xt = dot(xt, x0.T)
+        
+        #Calculate tau-lag G value
+        M = dot(x0xt, pinv(x0x0))
+        
         if use_G:
-            for i,tau in enumerate(tau_vals):
-                pass
+            return M
         else:
-            pass
-                
-         
+            return log(M)/tau  
         
     def forecast(self, t0_data, use_G = False):
-        train_data = self._cnvt_EOF_space(self._anomaly_srs, self._neigs)
+        t0_data, _, _ = run_mean(t0_data, self._wsize, shaveYr=True)
+        t0_data = calc_anomaly(t0_data, self._wsize, self._climo)
+        
+        #This will be replaced with HDF5 stuff if provided
+        fcast_out = [zeros(t0_data.shape) for fcast in self._fcast_times]
+        
+        if self._lats is not None:
+            data = self._area_wgt(self._anmaly_srs, self._lats)
+        else:
+            data = self._anomaly_srs
+            
+        train_data, eofs = self._cnvt_EOF_space(data, self._neigs)
         
         if not use_G:
-            train_tdim = train_data.shape[0] - self._wsize
+            tau = self._tau 
+            train_tdim = train_data.shape[0] - tau  #
+            x0 = train_data[:, 0:train_tdim]
+            xt = train_data[:, tau:(train_tdim+tau)]
+            
+            L = self._calc_M(x0, xt, tau, use_G)
+            xf = t0_data
+            for i,tau in enumerate(self._fcast_times*self._wsize):
+                xf = dot(L, xf)*tau
+                fcast_out[i] = xf
+            
         else:
-            train_tdim = train_data.shape[0] - self.fcast_times[-1]
-        
-        
-        
-        pass
-        
-    
+            train_tdim = train_data.shape[0] - self.fcast_times[-1]*self._wsize
+            x0 = train_data[:,0:train_tdim]
+            
+            for i,fcast in enumerate(self._fcast_times*self._wsize):
+                xt = train_data[:, tau:(train_tdim+tau)]
+                G = self._calc_M(x0, xt, tau, use_G=True)
+                xf = dot(G, t0_data)
+                fcast_out[i] = xf

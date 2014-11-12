@@ -112,12 +112,13 @@ def fcast_ce(h5file):
     
     return ces
     
-def calc_anomaly(data, yrsize):
+def calc_climo(data, yrsize, climo=None):
     old_shp = data.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
-    climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
+    if climo is None:
+        climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
     anomaly = data.reshape(new_shp) - climo
-    return anomaly.reshape(old_shp)
+    return (anomaly.reshape(old_shp), climo)
     
 def build_obs(obs, start_idxs, tau, test_dim, h5f=None):     
     obs_data = np.zeros( (len(start_idxs)*test_dim, obs.shape[1]),
