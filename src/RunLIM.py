@@ -28,14 +28,14 @@ neigs = 20          # number of eof compontents to retain
 num_trials = 139    # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
 detrend_data=False   # linearly detrend the observations
-global_eof=False    # calculate EOFs from entire grid rather than land vs. sea
+global_eof=True    # calculate EOFs from entire grid rather than land vs. sea
 
 # Check os, use appropriate data files
 # mask_file should contain a global grid with land points as true(1) and
 #   sea points as false(0)
 if os.name == 'nt':
     data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
-    output_loc = "G:\Hakim Research\pyLIM\Trend_LIM_data.h5"
+    output_loc = "G:\Hakim Research\data\pyLIM\Trend_LIM_data.h5"
     NCO = False  # cannot use NetCDF Ops on windows
 else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'

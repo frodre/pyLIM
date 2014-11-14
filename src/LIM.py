@@ -1,9 +1,23 @@
 #-*- coding: utf-8 -*-
-from numpy import sqrt, cos, radians, dot, log, exp, zeros
+from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16
 from numpy.linalg import pinv
 
 from Stats import calc_EOFs, run_mean
 import LIMTools as lt
+
+def _area_wgt(data, lats):
+    "Apply area weighting to data based on provided latitude values."
+    assert(data.shape[-1] == lats.shape[-1])
+    scale = sqrt(cos(radians(lats)))
+    return data * scale
+    
+def _calc_M(x0, xt, tau):
+    "Calculate either L or G for forecasting"
+    x0x0 = dot(x0, x0.T)
+    x0xt = dot(xt, x0.T)
+    
+    #Calculate tau-lag G value
+    return dot(x0xt, pinv(x0x0))
 
 class LIM(object):
     """Linear inverse forecast model.
@@ -30,7 +44,7 @@ class LIM(object):
     """
     
     def __init__(self, calibration, wsize, fcast_times, fcast_num_PCs,
-                  area_wgt_lats=None, use_G=False, H5file=None):
+                  area_wgt_lats=None, H5file=None):
         """
         TODO UPDATE
         Parameters
@@ -50,10 +64,9 @@ class LIM(object):
         
         self._calibration = calibration
         self._wsize = wsize
-        self.fcast_times = fcast_times
+        self.fcast_times = array(fcast_times, dtype=int16)
         self._neigs = fcast_num_PCs
         self._lats = area_wgt_lats
-        self._use_G = use_G
         self._H5file = H5file
         
         #Calculate anomaly time series from the data
@@ -65,52 +78,8 @@ class LIM(object):
         self._anomaly_srs, self._climo = lt.calc_anomaly(self._anomaly_srs,
                                                          self._wsize)
         
-        # Use a 1-tau lag for calculating forecast variable L
-        if not use_G:
-            self._tau = wsize
-        
-    def _area_wgt(data, lats):
-        """Apply area weighting to data based on provided latitude values.
-        
-        Uses sqrt(cos(lat)) as a scaling function to each data point.  Provided 
-        latitude vector needs to have the same last shape dimension as the data
-        for proper broadcasting over the data array.
-        
-        Parameters
-        ----------
-        data: ndarray
-            Spatial data to apply the area weight scaling to.
-        lats: ndarray
-            Latitude array matching the spatial shape of the data
-            
-        Returns
-        -------
-        Area-weighted data array
-        """
-        assert(data.shape[-1] == lats.shape[-1])
-        scale = sqrt(cos(radians(lats)))
-        return data * scale
-        
-    def _cnvt_EOF_space(data, neigs):
-        "Calculate EOFs and project data into EOF space."
-        eofs, _, var_pct = calc_EOFs(data.T)
-        eof_proj = dot(eofs.T, data.T)
-        return (eof_proj, eofs)
-        
-    def _calc_M(x0, xt, tau, use_G):
-        "Calculate either L or G for forecasting"
-        x0x0 = dot(x0, x0.T)
-        x0xt = dot(xt, x0.T)
-        
-        #Calculate tau-lag G value
-        M = dot(x0xt, pinv(x0x0))
-        
-        if use_G:
-            return M
-        else:
-            return log(M)/tau  
-        
-    def forecast(self, t0_data, use_G = False):
+          
+    def forecast(self, t0_data, use_G1 = False):
         """Run LIM forecast from given data.
         
         Performs LIM forecast over the times specified by the
@@ -123,14 +92,14 @@ class LIM(object):
         t0_data: ndarray
             MxN array to forecast from.  M is the sample dimension, while N is 
             the spatial dimension.  1-window length chunk will be removed from
-            each edge from the anomaly calculation procedure.
+            each edge from the anomaly calculation procedure.  N^ = N - 2*wsize
         use_G: bool
             Flag for using only the G-matrix for forecasting
             
         Returns
         -----
         fcast_out: ndarray
-            LIM forecasts in a KxMxN matrix where K corresponds to each forecast
+            LIM forecasts in a KxMxN^ matrix where K corresponds to each forecast
             time.
             
         Notes
@@ -141,44 +110,49 @@ class LIM(object):
         
         #Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shaveYr=True)
-        t0_data = lt.calc_anomaly(t0_data, self._wsize, self._climo)
+        t0_data, _ = lt.calc_anomaly(t0_data, self._wsize, self._climo)  #MxN^
         
         #This will be replaced with HDF5 stuff if provided
-        fcast_out = [zeros(t0_data.shape) for fcast in self.fcast_times]
+        fcast_out_shp = [len(self.fcast_times)] + list(t0_data.shape)    #KxMxN^
+        fcast_out = zeros(fcast_out_shp)
         
         #Area Weighting if _lats is set
         if self._lats is not None:
-            data = self._area_wgt(self._anmaly_srs, self._lats)
+            data = _area_wgt(self._anomaly_srs, self._lats)
         else:
             data = self._anomaly_srs
         
-        #Calibrate the LIM with EOFs from training data    
-        train_data, eofs = self._cnvt_EOF_space(data, self._neigs)
+        #Calibrate the LIM with (J=neigs) EOFs from training data
+        eofs, _, var_pct = calc_EOFs(data.T, self._neigs)          #eofs is MxJ
+        train_data = dot(eofs.T, self._anomaly_srs.T)
+        
+        #Project our testing data into eof space
+        proj_t0_data = dot(eofs.T, t0_data.T)                      #JxN^
         
         # Forecasts using L to determine G-values
-        if not use_G:
-            tau = self._tau 
-            train_tdim = train_data.shape[0] - tau  #
+        if not use_G1:
+            #Calculate L from time-lag of one window size (1-year for our LIM)
+            tau = self._wsize  
+            train_tdim = train_data.shape[1] - tau  #
             x0 = train_data[:, 0:train_tdim]
             xt = train_data[:, tau:(train_tdim+tau)]
             
-            L = self._calc_M(x0, xt, tau, use_G)
-            xf = t0_data
-            for i,tau in enumerate(self.fcast_times*self._wsize):
-                G = exp(L*tau)
-                xf = dot(G, t0_data)
-                fcast_out[i] = xf
+            G1 = _calc_M(x0, xt, tau)
+            for i,tau in enumerate(self.fcast_times):
+                G = G1**tau
+                xf = dot(G, proj_t0_data)
+                fcast_out[i] = dot(xf.T, eofs.T)
         
         # Forecasts using G only    
         else:
-            train_tdim = train_data.shape[0] - self.fcast_times[-1]*self._wsize
+            train_tdim = train_data.shape[1] - self.fcast_times[-1]*self._wsize
             x0 = train_data[:,0:train_tdim]
             
-            for i,fcast in enumerate(self.fcast_times*self._wsize):
+            for i,tau in enumerate(self.fcast_times*self._wsize):
                 xt = train_data[:, tau:(train_tdim+tau)]
-                G = self._calc_M(x0, xt, tau, use_G=True)
-                xf = dot(G, t0_data)
-                fcast_out[i] = xf
+                G = _calc_M(x0, xt, tau)
+                xf = dot(G, proj_t0_data)
+                fcast_out[i] = dot(xf.T, eofs.T)
                 
         
         return fcast_out
