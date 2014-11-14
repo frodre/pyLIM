@@ -64,3 +64,6 @@ docs/_build/
 #Ipython stuff 
 *.ipynb
 matplotlibrc
+
+
+

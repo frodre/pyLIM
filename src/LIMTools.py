@@ -10,6 +10,8 @@ from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
 
+__all__ = ['calc_anomaly']
+
 #custom colormap information, trying to reproduce Newman
 lb = tuple(np.array([150, 230, 255])/255.0)
 w = (1.0, 1.0, 1.0)
@@ -112,7 +114,7 @@ def fcast_ce(h5file):
     
     return ces
     
-def calc_climo(data, yrsize, climo=None):
+def calc_anomaly(data, yrsize, climo=None):
     old_shp = data.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
     if climo is None:

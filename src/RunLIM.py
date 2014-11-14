@@ -151,8 +151,8 @@ out_anom[:] = anomaly_srs
 fcast_times = np.array([x*yrsize for x in range(forecast_tlim+1)], dtype=np.int16)
 fcast_tdim = fcast_times[-1]                   # Size of tail necessary to make forecasts
 sample_tdim = old_shp[0] - fcast_tdim          # Size of useable time series for forecasting
-hold_chunk = int(ceil(sample_tdim/12*0.1))     # Size(yr) of chunk to withhold for testing
-test_tdim = hold_chunk*12                      # Size of testing time series
+hold_chunk = int(ceil(sample_tdim/yrsize*0.1)) # Size(yr) of chunk to withhold for testing
+test_tdim = hold_chunk*yrsize                  # Size of testing time series
 train_tdim = sample_tdim - test_tdim           # Size of training time series
 fcast_shp = [num_trials*test_tdim, old_shp[1]]
 

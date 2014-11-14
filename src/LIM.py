@@ -1,9 +1,9 @@
 #-*- coding: utf-8 -*-
-from numpy import sqrt, cos, radians, dot, log, zeros
+from numpy import sqrt, cos, radians, dot, log, exp, zeros
 from numpy.linalg import pinv
 
 from Stats import calc_EOFs, run_mean
-from LIMTools import calc_anomaly
+import LIMTools as lt
 
 class LIM(object):
     """Linear inverse forecast model.
@@ -58,12 +58,12 @@ class LIM(object):
         
         #Calculate anomaly time series from the data
         self._anomaly_srs, _bedge, _tedge = run_mean(self._calibration, 
-                                             self.wsize,
+                                             self._wsize,
                                              self._H5file,
                                              shaveYr=True)
         self._obs_use = [_bedge, calibration.shape[0]-_tedge]
-        self._anomaly_srs, self._climo = calc_anomaly(self._anomaly_srs,
-                                                      self.wsize)
+        self._anomaly_srs, self._climo = lt.calc_anomaly(self._anomaly_srs,
+                                                         self._wsize)
         
         # Use a 1-tau lag for calculating forecast variable L
         if not use_G:
@@ -141,10 +141,10 @@ class LIM(object):
         
         #Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shaveYr=True)
-        t0_data = calc_anomaly(t0_data, self._wsize, self._climo)
+        t0_data = lt.calc_anomaly(t0_data, self._wsize, self._climo)
         
         #This will be replaced with HDF5 stuff if provided
-        fcast_out = [zeros(t0_data.shape) for fcast in self._fcast_times]
+        fcast_out = [zeros(t0_data.shape) for fcast in self.fcast_times]
         
         #Area Weighting if _lats is set
         if self._lats is not None:
@@ -165,7 +165,8 @@ class LIM(object):
             L = self._calc_M(x0, xt, tau, use_G)
             xf = t0_data
             for i,tau in enumerate(self.fcast_times*self._wsize):
-                xf = dot(L, xf)*tau
+                G = exp(L*tau)
+                xf = dot(G, t0_data)
                 fcast_out[i] = xf
         
         # Forecasts using G only    
