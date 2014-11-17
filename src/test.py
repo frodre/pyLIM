@@ -31,16 +31,16 @@ spatial_shp = obs.shape[1:]
 obs = obs.reshape( (obs.shape[0], np.product(spatial_shp)) )
 
 yr = 12
-test_dat = obs[yr:yr*13]
-train_dat = np.concatenate( (obs[0:yr], obs[yr*13:]), axis=0)
-sample_tdim = len(train_dat) - 9*yr
-train_data = train_dat[0:sample_tdim]  #Calibration dataset
+test_dat = obs[0:yr*15]
+train_data = np.concatenate( (obs[0:yr], obs[yr*14:]), axis=0)
+sample_tdim = len(train_data) - 9*yr
+train_data = train_data[0:sample_tdim]  #Calibration dataset
 
 #lats = f.root.data.lats.read()
 #lons = f.root.data.lons.read()
 lats = lats.flatten()
 
-test_LIM = LIM.LIM(train_data, yr, [2], 20, area_wgt_lats=lats)
+test_LIM = LIM.LIM(train_data, yr, [0], 20, area_wgt_lats=lats)
 out = test_LIM.forecast(test_dat, use_G1=True)
 
 f.close()

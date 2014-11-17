@@ -11,8 +11,13 @@ def _area_wgt(data, lats):
     scale = sqrt(cos(radians(lats)))
     return data * scale
     
-def _calc_M(x0, xt, tau):
+def _calc_M(x0, xt):
     "Calculate either L or G for forecasting"
+    
+    # These represent the C(tau) and C(0) covariance matrices
+    #    Note: x is an anomaly vector, no division by N-1 because it's undone
+    #    in the inversion anyways
+    
     x0x0 = dot(x0, x0.T)
     x0xt = dot(xt, x0.T)
     
@@ -137,7 +142,7 @@ class LIM(object):
             x0 = train_data[:, 0:train_tdim]
             xt = train_data[:, tau:(train_tdim+tau)]
             
-            G1 = _calc_M(x0, xt, tau)
+            G1 = _calc_M(x0, xt)
             for i,tau in enumerate(self.fcast_times):
                 G = G1**tau
                 xf = dot(G, proj_t0_data)
@@ -150,7 +155,7 @@ class LIM(object):
             
             for i,tau in enumerate(self.fcast_times*self._wsize):
                 xt = train_data[:, tau:(train_tdim+tau)]
-                G = _calc_M(x0, xt, tau)
+                G = _calc_M(x0, xt)
                 xf = dot(G, proj_t0_data)
                 fcast_out[i] = dot(xf.T, eofs.T)
                 

@@ -18,14 +18,14 @@ from math import ceil
 from scipy.io import netcdf as ncf
 from scipy.signal import detrend
 from time import time
-from LIMTools import climo
+from LIMTools import calc_anomaly
 
 #### LIM PARAMETERS ####
 wsize = 12          # window size for running average
 yrsize = 12         # number of elements in year
 var_name = 'air'    # variable name in netcdf file
 neigs = 20          # number of eof compontents to retain
-num_trials = 139    # number of lim trials to run
+num_trials = 1    # number of lim trials to run
 forecast_tlim = 9   # number years to forecast
 detrend_data=False   # linearly detrend the observations
 global_eof=True    # calculate EOFs from entire grid rather than land vs. sea
@@ -34,8 +34,8 @@ global_eof=True    # calculate EOFs from entire grid rather than land vs. sea
 # mask_file should contain a global grid with land points as true(1) and
 #   sea points as false(0)
 if os.name == 'nt':
-    data_file = "G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
-    output_loc = "G:\Hakim Research\data\pyLIM\Trend_LIM_data.h5"
+    data_file = r"G:/Hakim Research/data/20CR/air.2m.mon.mean.nc"
+    output_loc = r"G:\Hakim Research\data\pyLIM\test_LIM.h5"
     NCO = False  # cannot use NetCDF Ops on windows
 else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
@@ -122,7 +122,7 @@ lon_data[:] = lons
 #Calc running mean using window size over the data
 print "\nCalculating running mean..."
 t1 = time()
-run_mean, bedge, tedge = st.runMean(obs_data.read(), wsize, out, shaveYr=True)
+run_mean, bedge, tedge = st.run_mean(obs_data.read(), wsize, out, shaveYr=True)
 t2 = time()
 dur = t2 - t1
 print "Done! (Completed in %f s)" % dur
@@ -185,13 +185,10 @@ for j,trial in enumerate(test_start_idx):
                                axis=0 )
     
     #Calculate running mean 
-    train_mean, b, t = st.runMean(train_set, wsize, shaveYr=True)
+    train_mean, b, t = st.run_mean(train_set, wsize, shaveYr=True)
 
     #Anomalize
-    old_shp = train_mean.shape
-    new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
-    train_climo = climo(train_mean, yrsize)
-    train_anom = (train_mean.reshape(new_shp) - train_climo).reshape(old_shp)
+    train_anom, _ = calc_anomaly(train_mean, yrsize)
     test_anom = anomaly_srs[trial:(trial+test_tdim+fcast_tdim)]
     
     if detrend_data:
@@ -205,7 +202,7 @@ for j,trial in enumerate(test_start_idx):
     #EOF Calculation
     if global_eof:  #Globaal EOFs
         print "\tCalculating EOFs..."
-        eofs, eig_vals, var_pct = st.calcEOF(wgt_train_anom.T, neigs)
+        eofs, eig_vals, var_pct = st.calc_EOFs(wgt_train_anom.T, neigs)
         print ("\tLeading %i EOFS explain %f percent of the total variance"
                 % (neigs, var_pct))
     else:
@@ -219,12 +216,12 @@ for j,trial in enumerate(test_start_idx):
         nland_eigs = neigs/2
         
         print "\tCalculating Ocean EOFs..."
-        sea_eofs, sea_eigs, sea_var = st.calcEOF(ocean.T, nsea_eigs)
+        sea_eofs, sea_eigs, sea_var = st.calc_EOFs(ocean.T, nsea_eigs)
         print ("\t Leading %i sea EOFs explain %f percent of the total variance"
                 % (nsea_eigs, sea_var))
                 
         print "\tCalculating Land EOFs..."
-        land_eofs, land_eigs, land_var = st.calcEOF(land.T, nland_eigs)
+        land_eofs, land_eigs, land_var = st.calc_EOFs(land.T, nland_eigs)
         print ("\t Leading %i land EOFs explain %f percent of the total variance"
                 % (nland_eigs, land_var))
         
@@ -241,7 +238,7 @@ for j,trial in enumerate(test_start_idx):
     # forecast for each time
     print "\tPerforming forecasts..."
     for i,tau in enumerate(fcast_times):
-        x0 = train_eof_proj[:,0:train_tdim]
+        x0 = train_eof_proj[:,0:train_tdim]  #should this be sample or train_tdim?
         xt = train_eof_proj[:,tau:(train_tdim + tau)]
         xtx0 = np.dot(xt,x0.T) 
         x0x0 = np.dot(x0, x0.T)
