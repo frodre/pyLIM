@@ -41,7 +41,7 @@ else:
     #data_file = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
     data_file = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
     mask_file = '/home/chaos2/wperkins/data/20CR/land.nc'
-    output_loc = '/home/chaos2/wperkins/data/pyLIM/Trended_sepEOFs_LIM_data.h5'
+    output_loc = '/home/chaos2/wperkins/data/pyLIM/test_LIM.h5'
     
 
 
@@ -185,7 +185,7 @@ for j,trial in enumerate(test_start_idx):
                                axis=0 )
     
     #Calculate running mean 
-    train_mean, b, t = st.run_mean(train_set, wsize, shaveYr=True)
+    train_mean, _, _ = st.run_mean(train_set, wsize, shaveYr=True)
 
     #Anomalize
     train_anom, climo = calc_anomaly(train_mean, yrsize)
@@ -239,13 +239,15 @@ for j,trial in enumerate(test_start_idx):
     # forecast for each time
     print "\tPerforming forecasts..."
     for i,tau in enumerate(fcast_times):
-        x0 = train_eof_proj[:,0:train_tdim]  #should this be sample or train_tdim?
+        x0 = train_eof_proj[:,0:train_tdim]  #split dataset for different lead times
         xt = train_eof_proj[:,tau:(train_tdim + tau)]
         xtx0 = np.dot(xt,x0.T) 
         x0x0 = np.dot(x0, x0.T)
         M = np.dot(xtx0, np.linalg.pinv(x0x0))
 
         # use independent data to make forecast
+        #  TODO: I should only put in test_tdim worth of data, don't need extra bit unless I'm
+        #        doing direct error checks right here in eof space.
         x0i = test_eof_proj[:,0:test_tdim]
         xti = test_eof_proj[:,tau:(test_tdim+tau)]
         xfi = np.dot(M, x0i)

@@ -84,7 +84,7 @@ class LIM(object):
                                                          self._wsize)
         
           
-    def forecast(self, t0_data, use_G1 = False):
+    def forecast(self, t0_data, use_lag1 = True):
         """Run LIM forecast from given data.
         
         Performs LIM forecast over the times specified by the
@@ -98,8 +98,8 @@ class LIM(object):
             MxN array to forecast from.  M is the sample dimension, while N is 
             the spatial dimension.  1-window length chunk will be removed from
             each edge from the anomaly calculation procedure.  N^ = N - 2*wsize
-        use_G: bool
-            Flag for using only the G-matrix for forecasting
+        use_lag1: bool
+            Flag for using only the G_1-matrix for forecasting
             
         Returns
         -----
@@ -135,7 +135,7 @@ class LIM(object):
         proj_t0_data = dot(eofs.T, t0_data.T)                      #JxN^
         
         # Forecasts using L to determine G-values
-        if not use_G1:
+        if use_lag1:
             #Calculate L from time-lag of one window size (1-year for our LIM)
             tau = self._wsize  
             train_tdim = train_data.shape[1] - tau  #
