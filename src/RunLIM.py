@@ -188,8 +188,9 @@ for j,trial in enumerate(test_start_idx):
     train_mean, b, t = st.run_mean(train_set, wsize, shaveYr=True)
 
     #Anomalize
-    train_anom, _ = calc_anomaly(train_mean, yrsize)
-    test_anom = anomaly_srs[trial:(trial+test_tdim+fcast_tdim)]
+    train_anom, climo = calc_anomaly(train_mean, yrsize)
+    test_anom = run_mean[trial:(trial+test_tdim+fcast_tdim)]
+    test_anom, _ = calc_anomaly(test_anom, yrsize, climo)
     
     if detrend_data:
         train_anom = detrend(train_anom, axis=0, type='linear')
