@@ -1,9 +1,7 @@
 import os
-import pandas as pd
 import tables as tb
 import numpy as np
-import numexpr as ne
-import Stats as st
+import Stats as St
 import matplotlib.pyplot as plt
 import scipy.io.netcdf as ncf
 from mpl_toolkits.basemap import Basemap
@@ -17,7 +15,7 @@ lb = tuple(np.array([150, 230, 255])/255.0)
 w = (1.0, 1.0, 1.0)
 yl = tuple(np.array([243, 237, 48])/255.0)
 rd = tuple(np.array([255, 50, 0])/255.0)
-dk = tuple(np.array([110,0,0])/255.0)
+dk = tuple(np.array([110, 0, 0])/255.0)
 
 cdict = {'red':     ((0.0, lb[0], lb[0]),
                      (0.1, w[0], w[0]),
@@ -38,6 +36,7 @@ cdict = {'red':     ((0.0, lb[0], lb[0]),
                      (1.0, dk[2], dk[2]))}
 
 newm = LinearSegmentedColormap('newman', cdict)
+
 
 def fcast_corr(h5file):
     leaf_name = 'corr_check'
@@ -64,13 +63,14 @@ def fcast_corr(h5file):
         corrs = np.zeros((nfcasts, obs.shape[1]))
     
     fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
-    for i,fcast in enumerate(fcasts):
+    for i, fcast in enumerate(fcasts):
         print 'Calculating LAC: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
-        corrs[i] = st.calcLCA(fcast.read(), compiled_obs)
+        corrs[i] = St.calc_lac(fcast.read(), compiled_obs)
 
     return corrs
-    
+
+
 def fcast_ce(h5file):
     leaf_name = 'ce_check' 
     h5_datagrp = h5file.root.data
@@ -81,25 +81,25 @@ def fcast_ce(h5file):
     nfcasts = h5_datagrp.fcast_bin._v_nchildren
     try:
         ces = h5file.create_carray('/stats', leaf_name,
-                                     atom=tb.Atom.from_dtype(obs.dtype),
-                                     shape=(nfcasts, obs.shape[1]),
-                                     title="Coefficient of Efficiency",
-                                     createparents=True)
+                                   atom=tb.Atom.from_dtype(obs.dtype),
+                                   shape=(nfcasts, obs.shape[1]),
+                                   title="Coefficient of Efficiency",
+                                   createparents=True)
     except tb.NodeError:
         h5file.remove_node(h5file.root.stats, leaf_name)
         ces = h5file.create_carray('/stats', leaf_name,
-                                     atom=tb.Atom.from_dtype(obs.dtype),
-                                     shape=(nfcasts, obs.shape[1]),
-                                     title="Coefficient of Efficiency",
-                                     createparents=True)
+                                   atom=tb.Atom.from_dtype(obs.dtype),
+                                   shape=(nfcasts, obs.shape[1]),
+                                   title="Coefficient of Efficiency",
+                                   createparents=True)
     except tb.FileModeError:
         ces = np.zeros((nfcasts, obs.shape[1]))
 
     fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
-    for i,fcast in enumerate(fcasts):
+    for i, fcast in enumerate(fcasts):
         print 'Calculating CE: %i yr fcast' % i
         compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
-        ces[i] = st.calcCE(fcast.read(), compiled_obs, obs)
+        ces[i] = St.calc_ce(fcast.read(), compiled_obs, obs)
         
         #ce_tmp = np.zeros( obs.shape[1] )
         #for j, start_idx in enumerate(test_start_idxs):
@@ -113,7 +113,8 @@ def fcast_ce(h5file):
         #print "Averaging, len %i, j %i" % (len(test_start_idxs), j+1)
     
     return ces
-    
+
+
 def calc_anomaly(data, yrsize, climo=None):
     old_shp = data.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
@@ -121,23 +122,26 @@ def calc_anomaly(data, yrsize, climo=None):
         climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
     anomaly = data.reshape(new_shp) - climo
     return (anomaly.reshape(old_shp), climo)
+
+
+def build_obs(obs, start_idxs, tau, test_dim):
+    obs_data = np.zeros((len(start_idxs)*test_dim, obs.shape[1]),
+                        dtype=obs.dtype)
     
-def build_obs(obs, start_idxs, tau, test_dim, h5f=None):     
-    obs_data = np.zeros( (len(start_idxs)*test_dim, obs.shape[1]),
-                          dtype = obs.dtype)
-    
-    for i,idx in enumerate(start_idxs):
+    for i, idx in enumerate(start_idxs):
         start = i*test_dim
         end = i*test_dim + test_dim
         obs_data[start:end] = obs[idx+tau:idx+tau+test_dim]
         
     return obs_data
 
+
 def area_wgt(data, lats):
     assert(data.shape[-1] == lats.shape[-1])
     scale = np.sqrt(np.cos(np.radians(lats)))
     return data * scale
-    
+
+
 def load_landsea_mask(maskfile, tile_len):
     f_mask = ncf.netcdf_file(maskfile)
     land_mask = f_mask.variables['land']
@@ -154,18 +158,19 @@ def load_landsea_mask(maskfile, tile_len):
     
     tiled_landmask = np.repeat(np.expand_dims(land_mask, 0),
                                tile_len,
-                               axis=0 )
+                               axis=0)
     tiled_seamask = np.repeat(np.expand_dims(sea_mask, 0),
                               tile_len,
                               axis=0)
-    return (tiled_landmask, tiled_seamask)
+    return tiled_landmask, tiled_seamask
     
 ####  PLOTTING FUNCTIONS  ####
-    
+
+
 def plot_corrdata(lats, lons, data, title, outfile=None):
     plt.clf()
-    contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
-    cbticks = np.linspace(0,1,11)
+    contourlev = np.concatenate(([-1], np.linspace(0, 1, 11)))
+    cbticks = np.linspace(0, 1, 11)
     plt.close('all')
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
@@ -173,7 +178,7 @@ def plot_corrdata(lats, lons, data, title, outfile=None):
     color = newm
     color.set_under('#9acce5')
     m.contourf(lons, lats, data, latlon=True, cmap=color,
-               vmin=0, levels = contourlev)
+               vmin=0, levels=contourlev)
     m.colorbar(ticks=cbticks)
     plt.title(title)
     
@@ -181,6 +186,7 @@ def plot_corrdata(lats, lons, data, title, outfile=None):
         plt.savefig(outfile, format='png')
     else:
         plt.show()
+
 
 def plot_cedata(lats, lons, data, title, outfile=None):
     #contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
@@ -190,12 +196,12 @@ def plot_cedata(lats, lons, data, title, outfile=None):
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
     
-    contourlev = np.linspace(0,1,11)
+    # contourlev = np.linspace(0, 1, 11)
     
     if data.min() < 0:
         color = cm.bwr
-        neglev = np.linspace(-1, 0, 11)
-        contourlev = np.concatenate((neglev, contourlev))
+        # neglev = np.linspace(-1, 0, 11)
+        # contourlev = np.concatenate((neglev, contourlev))
     else:
         color = cm.OrRd
         
@@ -206,7 +212,8 @@ def plot_cedata(lats, lons, data, title, outfile=None):
         plt.savefig(outfile, format='png')
     else:
         plt.show()
-    
+
+
 def plot_spatial(lats, lons, data, title, outfile=None):
     """
     Method for basic spatial data plots.  Uses diverging color scheme, so 
@@ -233,7 +240,7 @@ def plot_spatial(lats, lons, data, title, outfile=None):
     m.drawcoastlines()
     color = cm.bwr
     m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=-plt_range,
-             vmax = plt_range)
+             vmax=plt_range)
     m.colorbar()
     
     plt.title(title)
@@ -241,16 +248,17 @@ def plot_spatial(lats, lons, data, title, outfile=None):
         plt.savefig(outfile, format='png')
     else:
         plt.show()
-    
+
+
 def plot_vstau(fcast_data, eof_data, obs, obs_tidxs, loc, title, outfile):
     fcast_tlim = fcast_data.shape[1]
     evar = np.zeros(fcast_tlim)
     for tau in range(fcast_tlim):
-        tmpdata = fcast_data[:,tau]
+        tmpdata = fcast_data[:, tau]
         reconstructed = np.array([
-                            np.dot(eof_data[loc], fcast)
-                            for fcast in tmpdata
-                        ])
+                                 np.dot(eof_data[loc], fcast)
+                                 for fcast in tmpdata
+                                 ])
         truth = np.array([obs.T[loc, idxs] for idxs in obs_tidxs])
         error = reconstructed - truth
         evar[tau] = error.var()
@@ -261,21 +269,22 @@ def plot_vstau(fcast_data, eof_data, obs, obs_tidxs, loc, title, outfile):
     ax.set_xlabel('Lead time (months)')
     ax.set_ylabel('Error Variance (K)')
     fig.savefig(outfile, format='png')
-    
+
+
 def plot_vstime(obs, loc):
     #Variance and mean vs time sample in true space
     var_vs_time = np.array([obs.T[loc, 0:i].var() 
-                            for i in range(1,obs.shape[0])])
+                            for i in range(1, obs.shape[0])])
     mean_vs_time = np.array([obs.T[loc, 0:i].mean()
                             for i in range(1, obs.shape[0])])
     varfig, varax = plt.subplots()
     varax.plot(var_vs_time, label='Variance')
-    varax.plot(mean_vs_time, label = 'Mean')
-    varax.axvline(x = 0, color = 'r')
+    varax.plot(mean_vs_time, label='Mean')
+    varax.axvline(x=0, color='r')
     #varax.axvline(x = time_dim, color = 'r')
     #varax.axvline(x = forecast_tlim, color = 'y')
     #varax.axvline(x = shp_anomaly.shape[0], color = 'y')
-    varax.axhline(y = 0, linewidth = 1, c='k')
+    varax.axhline(y=0, linewidth=1, c='k')
     varax.set_title('variance and mean w/ increasing time sample')
     varax.set_xlabel('Times included (0 to this month)')
     varax.set_ylabel('Variance & Mean (K)')
@@ -283,29 +292,29 @@ def plot_vstime(obs, loc):
     varfig.show()
     
     runfig, runax = plt.subplots()
-    runax.plot(obs.T[loc,:])
+    runax.plot(obs.T[loc, :])
     runax.set_title('Time series at loc = %i (12-mon running mean)' % loc)
     runax.set_xlabel('Month')
     runax.set_ylabel('Temp Anomaly (K)')
     runfig.show()
-    
+
+
 def plot_vstrials(fcast_data, obs, test_tidxs, test_tdim, tau, loc):
     num_trials = fcast_data.shape[0]/test_tdim
     anom_truth = build_obs(obs, test_tidxs, tau, test_tdim)
-    loc_tru_var = anom_truth[:,loc].var()
+    loc_tru_var = anom_truth[:, loc].var()
     print loc_tru_var
-    loc_tru_mean = anom_truth[:,loc].mean()
+    loc_tru_mean = anom_truth[:, loc].mean()
     
-    fcast_var = np.zeros( num_trials )
-    fcast_mean = np.zeros( num_trials )
+    fcast_var = np.zeros(num_trials)
+    fcast_mean = np.zeros(num_trials)
     
     for i in xrange(num_trials):
         end = i*test_tdim + test_tdim
         fcast_var[i] = fcast_data[0:end, loc].var()
         fcast_mean[i] = fcast_data[0:end, loc].mean()
     
-    fig, ax = plt.subplots(2,1, sharex=True)
-    
+    fig, ax = plt.subplots(2, 1, sharex=True)
     
     ax[0].plot(fcast_var, color='b', linewidth=2, label='Fcast Var')
     ax[0].axhline(loc_tru_var, xmin=0, xmax=num_trials,
@@ -321,8 +330,8 @@ def plot_vstrials(fcast_data, obs, test_tidxs, test_tdim, tau, loc):
     #    ax[0].axhline(y=var, linestyle = '--', color = line.get_color())
     
     ax[0].set_title('Forecast Variance & Mean vs. # Trials (Single Gridpoint)'
-                     ' Tau = %i' % tau)
-    ax[0].set_ylim(0,0.8)
+                    ' Tau = %i' % tau)
+    ax[0].set_ylim(0, 0.8)
     ax[1].set_xlabel('Trial #')
     ax[0].set_ylabel('Variance (K)')
     ax[1].set_ylabel('Mean (K)')
@@ -331,17 +340,15 @@ def plot_vstrials(fcast_data, obs, test_tidxs, test_tdim, tau, loc):
 
 if __name__ == "__main__":
     if os.name == 'nt':
-        outfile = 'G:\Hakim Research\pyLIM\LIM_data.h5'
-        #outfile = 'G:\Hakim Research\pyLIM\Trend_LIM_data.h5'
+        outf = 'G:\Hakim Research\pyLIM\LIM_data.h5'
+        #outf = 'G:\Hakim Research\pyLIM\Trend_LIM_data.h5'
     else:
-        #outfile = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
-        #outfile = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
-        outfile = '/home/chaos2/wperkins/data/pyLIM/Trended_sepEOFs_LIM_data.h5'
-    h5file = tb.open_file(outfile, mode='a')
+        #outf = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
+        #outf = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
+        outf = '/home/chaos2/wperkins/data/pyLIM/Trended_sepEOFs_LIM_data.h5'
+    h5f = tb.open_file(outf, mode='a')
     try:
-        corr = fcast_corr(h5file)
-        ce = fcast_ce(h5file)
+        corr = fcast_corr(h5f)
+        ce = fcast_ce(h5f)
     finally:
-        h5file.close()
-    
-        
+        h5f.close()

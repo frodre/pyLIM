@@ -8,7 +8,8 @@ import numexpr as ne
 import tables as tb
 from math import ceil
 
-def run_mean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
+
+def run_mean(data, window_size, h5_file=None, h5_parent=None, shave_yr=False):
     """
     A function for calculating the running mean on data.
 
@@ -36,23 +37,23 @@ def run_mean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
     
     dshape = data.shape
     yrsize = 12
-    assert( dshape[0] >= window_size ), ("Window size must be smaller than or "
-                                          "equal to the length of the time "
-                                          "dimension of the data.")
-    if shaveYr:
+    assert(dshape[0] >= window_size), ("Window size must be smaller than or "
+                                       "equal to the length of the time "
+                                       "dimension of the data.")
+    if shave_yr:
         tedge = window_size/2
         cut_from_top = yrsize*int(ceil(tedge/12.0))
-        bedge = (window_size/2) + (window_size%2) - 1
+        bedge = (window_size/2) + (window_size % 2) - 1
         cut_from_bot = yrsize*int(ceil(bedge/12.0))
     else:
         cut_from_top = window_size/2
-        bedge = cut_from_bot = (window_size/2) + (window_size%2) - 1
+        bedge = cut_from_bot = (window_size/2) + (window_size % 2) - 1
     tot_cut = cut_from_top + cut_from_bot
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
     
     assert(new_shape[0] > 0), ("Not enough data to trim partial years from "
-                                "edges.  Please try with shaveYr=False")
+                               "edges.  Please try with shaveYr=False")
 
     if h5_file is not None:
         is_h5 = True
@@ -61,17 +62,17 @@ def run_mean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
         
         try:
             result = h5_file.create_carray(h5_parent, 
-                                       'run_mean',
-                                       atom = tb.Atom.from_dtype(data.dtype),
-                                       shape = new_shape,
-                                       title = '12-month running mean')
+                                           'run_mean',
+                                           atom=tb.Atom.from_dtype(data.dtype),
+                                           shape=new_shape,
+                                           title='12-month running mean')
         except tb.NodeError:
             h5_file.remove_node(h5_parent.run_mean)
             result = h5_file.create_carray(h5_parent, 
-                                       'run_mean',
-                                       atom = tb.Atom.from_dtype(data.dtype),
-                                       shape = new_shape,
-                                       title = '12-month running mean')
+                                           'run_mean',
+                                           atom=tb.Atom.from_dtype(data.dtype),
+                                           shape=new_shape,
+                                           title='12-month running mean')
             
     else:
         is_h5 = False                                       
@@ -81,16 +82,16 @@ def run_mean(data, window_size, h5_file=None, h5_parent=None, shaveYr=False):
         #if i % 100 == 0:
         #    print 'Calc for index %i' % i
         cntr = cut_from_bot - bedge + i
-        result[i] = (data[(cntr):(cntr+window_size)].sum(axis=0) / 
-                        float(window_size))
+        result[i] = (data[cntr:(cntr+window_size)].sum(axis=0) /
+                     float(window_size))
                         
     if is_h5:
         result = result.read()
     
-    return (result, cut_from_bot, cut_from_top)
+    return result, cut_from_bot, cut_from_top
    
 
-def calc_EOFs(data, num_eigs, retPCs = False):
+def calc_eofs(data, num_eigs, ret_pcs=False):
     """
     Method to calculate the EOFs of given  dataset.  This assumes data comes in as
     an m x n matrix where m is the spatial dimension and n is the sampling
@@ -108,15 +109,16 @@ def calc_EOFs(data, num_eigs, retPCs = False):
     Returns
     -------
 
-    """ #TODO: Finish returns
+    """  # TODO: Finish returns
     
-    eofs, E, pcs = np.linalg.svd(data, full_matrices=False)
-    eig_vals = (E ** 2) / (len(E) - 1.)
+    eofs, e, pcs = np.linalg.svd(data, full_matrices=False)
+    eig_vals = (e ** 2) / (len(e) - 1.)
     tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
 
-    return (eofs[:,0:num_eigs], eig_vals[0:num_eigs], tot_var)
-    
-def calc_CE(fcast, trial_obs, obs):
+    return eofs[:, 0:num_eigs], eig_vals[0:num_eigs], tot_var
+
+
+def calc_ce(fcast, trial_obs, obs):
     """
     Method to calculate the Coefficient of Efficiency as defined by Nash and
     Sutcliffe 1970.
@@ -127,14 +129,15 @@ def calc_CE(fcast, trial_obs, obs):
         Time series of forecast data. M x N where M is the temporal dimension.
     obs: ndarray
         Time series of observations. M x N
-    """ #TODO: Finish returns
+    """  # TODO: Finish returns
      
     cvar = obs.var(axis=0)
     error = ne.evaluate('(trial_obs - fcast)**2')
     evar = error.sum(axis=0)/(len(error))
     return 1 - evar/cvar
-    
-def calc_LAC(fcast, obs):
+
+
+def calc_lac(fcast, obs):
     """
     Method to calculate the Local Anomaly Correlation (LAC).
     
@@ -161,6 +164,3 @@ def calc_LAC(fcast, obs):
     std = f_std * o_std
     
     return cov / std
-    
-    
-
