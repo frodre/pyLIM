@@ -3,7 +3,7 @@ from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16
 from numpy.linalg import pinv
 
 from Stats import calc_eofs, run_mean
-import LIMTools as lt
+import LIMTools as Lt
 
 
 def _area_wgt(data, lats):
@@ -121,12 +121,12 @@ class LIM(object):
                                                      self._H5file,
                                                      shave_yr=True)
         self._obs_use = [_bedge, self._calibration.shape[0]-_tedge]
-        self._anomaly_srs, self._climo = lt.calc_anomaly(self._anomaly_srs,
+        self._anomaly_srs, self._climo = Lt.calc_anomaly(self._anomaly_srs,
                                                          self._wsize)
         
         #Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
-        t0_data, _ = lt.calc_anomaly(t0_data, self._wsize, self._climo)  # MxN^
+        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize, self._climo)  # MxN^
         
         #This will be replaced with HDF5 stuff if provided
         fcast_out_shp = [len(self.fcast_times)] + list(t0_data.shape)  # KxMxN^
