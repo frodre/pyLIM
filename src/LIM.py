@@ -1,6 +1,9 @@
 #-*- coding: utf-8 -*-
-from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16
+from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16, copy
+from numpy import linspace, unique, concatenate
 from numpy.linalg import pinv
+from scipy.signal import detrend
+from math import ceil
 
 from Stats import calc_eofs, run_mean
 import LIMTools as Lt
@@ -23,7 +26,7 @@ def _calc_m(x0, xt):
     x0x0 = dot(x0, x0.T)
     x0xt = dot(xt, x0.T)
     
-    #Calculate tau-lag G value
+    # Calculate tau-lag G value
     return dot(x0xt, pinv(x0x0))
 
 
@@ -59,8 +62,7 @@ class LIM(object):
         calibration: ndarray
             Dataset for determining LIM forecast EOFs.  Provided data should be
             in a 2D MxN matrix where M (rows) represent temporal samples and
-            N(columns) represent spatial samples. Data should be in spatial
-            anomaly format.
+            N(columns) represent spatial samples.
         wsize: int
             Windowsize for running mean.  For this implementation it should
             be equal to a year's worth of samples
@@ -86,7 +88,7 @@ class LIM(object):
         self._H5file = h5file
         self._obs_use = self._anomaly_srs = self._climo = None
 
-    def forecast(self, t0_data, use_lag1=True):
+    def forecast(self, t0_data, use_lag1=True, detrend_data=False):
         """Run LIM forecast from given data.
         
         Performs LIM forecast over the times specified by the
@@ -99,14 +101,14 @@ class LIM(object):
         t0_data: ndarray
             MxN array to forecast from.  M is the sample dimension, while N is 
             the spatial dimension.  1-window length chunk will be removed from
-            each edge from the anomaly calculation procedure.  N^ = N - 2*wsize
+            each edge from the anomaly calculation procedure.  M^ = M - 2*wsize
         use_lag1: bool
             Flag for using only the G_1-matrix for forecasting
             
         Returns
         -----
         fcast_out: ndarray
-            LIM forecasts in a KxMxN^ matrix where K corresponds to each
+            LIM forecasts in a KxM^xN matrix where K corresponds to each
             forecast time.
             
         Notes
@@ -115,41 +117,44 @@ class LIM(object):
         obj is provided it will output the forecast to this file.
         """
 
-        #Calculate anomaly time series from the data
+        # Calculate anomaly time series from the data
         self._anomaly_srs, _bedge, _tedge = run_mean(self._calibration,
                                                      self._wsize,
                                                      self._H5file,
                                                      shave_yr=True)
-        self._obs_use = [_bedge, self._calibration.shape[0]-_tedge]
         self._anomaly_srs, self._climo = Lt.calc_anomaly(self._anomaly_srs,
                                                          self._wsize)
         
-        #Calculate anomalies for initial data
+        # Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
-        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize, self._climo)  # MxN^
+        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize, self._climo)  # M^xN
         
-        #This will be replaced with HDF5 stuff if provided
-        fcast_out_shp = [len(self.fcast_times)] + list(t0_data.shape)  # KxMxN^
+        # This will be replaced with HDF5 stuff if provided
+        fcast_out_shp = [len(self.fcast_times)] + list(t0_data.shape)  # KxM^xN
         fcast_out = zeros(fcast_out_shp)
         
-        #Area Weighting if _lats is set
+        # Area Weighting if _lats is set
         if self._lats is not None:
             data = _area_wgt(self._anomaly_srs, self._lats)
         else:
             data = self._anomaly_srs
+
+        # Detrend data if desired
+        if detrend_data:
+            data = detrend(data, axis=0, type='linear')
         
-        #Calibrate the LIM with (J=neigs) EOFs from training data
-        eofs, _, var_pct = calc_eofs(data.T, self._neigs)         # eofs is MxJ
-        train_data = dot(eofs.T, self._anomaly_srs.T)
+        # Calibrate the LIM with (J=neigs) EOFs from training data
+        eofs, _, var_pct = calc_eofs(data.T, self._neigs)         # eofs is NxJ
+        train_data = dot(eofs.T, self._anomaly_srs.T)             # JxM^
         
-        #Project our testing data into eof space
-        proj_t0_data = dot(eofs.T, t0_data.T)                      # JxN^
+        # Project our testing data into eof space
+        proj_t0_data = dot(eofs.T, t0_data.T)                     # JxM^
         
         # Forecasts using L to determine G-values
         if use_lag1:
-            #Calculate L from time-lag of one window size (1-year for our LIM)
+            # Calculate L from time-lag of one window size (1-year for our LIM)
             tau = self._wsize  
-            train_tdim = train_data.shape[1] - tau  #
+            train_tdim = train_data.shape[1] - tau
             x0 = train_data[:, 0:train_tdim]
             xt = train_data[:, tau:(train_tdim+tau)]
             
@@ -170,4 +175,70 @@ class LIM(object):
                 xf = dot(g, proj_t0_data)
                 fcast_out[i] = dot(xf.T, eofs.T)
         
-        return fcast_out
+        return fcast_out, eofs
+
+
+class ResampleLIM(LIM):
+
+    def __init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
+                 hold_chk_pct, num_trials, area_wgt_lats=None, h5file=None):
+
+        LIM.__init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
+                     area_wgt_lats, h5file)
+
+        # Need original input dataset for resampling
+        self._original_obs = copy(self._calibration)
+        self._num_trials = num_trials
+
+        # Initialize important indice limits for resampling procedure
+        _fcast_tdim = self.fcast_times[-1]
+        _sample_tdim = self._original_obs.shape[0]
+        # 2*self._wsize is to account for edge removal from running mean
+        _useable_tdim = (_sample_tdim - _fcast_tdim - 2*self._wsize)
+        hold_chk = int(ceil(_sample_tdim/self._wsize * hold_chk_pct))
+
+        self._test_tdim = hold_chk * self._wsize
+        self._trials_out_shp = [self._num_trials, len(self.fcast_times),
+                                self._neigs, self._test_tdim]
+        self._test_start_idx = unique(linspace(0,
+                                               _useable_tdim,
+                                               self._num_trials
+                                               ).astype(int16))
+
+        # Calculate edge concatenation lengths for anomaly procedure
+        _, bedge, tedge = run_mean(calibration, wsize, shave_yr=True)
+        self._anom_edges = [bedge, tedge]
+
+    def forecast(self, use_lag1=True, detrend_data=False):
+
+        _fcast_out = zeros(self._trials_out_shp)
+        _eofs_out = zeros(self._num_trials,
+                          self._neigs,
+                          self._original_obs.shape[1])
+
+        for j, trial in enumerate(self._test_start_idx):
+
+            # beginning and end indices for test chunk
+            bot_idx, top_idx = (self._anom_edges[0] + trial,
+                                self._anom_edges[0] + trial + self._test_tdim)
+
+            # create testing and training sets
+            obs_dat = self._original_obs
+            train_set = concatenate((obs_dat[0:bot_idx],
+                                     obs_dat[top_idx:]),
+                                    axis=0)
+            test_set = obs_dat[(bot_idx - self._anom_edges[0]):
+                               (top_idx + self._anom_edges[1])]
+            self._calibration = train_set
+
+            _fcast, _eofs = LIM.forecast(self, test_set)
+            _fcast_out[j] = _fcast
+            _eofs_out[j] = _eofs
+
+        return _fcast_out, _eofs_out
+
+
+# This class will be experimental at most.
+# Have to make the assumption that anomaly uses entire sample average
+class RandomResampleLIM(LIM):
+    pass

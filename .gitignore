@@ -65,5 +65,8 @@ docs/_build/
 *.ipynb
 matplotlibrc
 
+#pyCharm stuff
+.idea/*
+
 
 
