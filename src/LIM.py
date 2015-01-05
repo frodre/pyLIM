@@ -130,7 +130,8 @@ class LIM(object):
         t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize, self._climo)  # M^xN
         
         # This will be replaced with HDF5 stuff if provided
-        fcast_out_shp = [len(self.fcast_times)] + list(t0_data.shape)  # KxM^xN
+        #fcast_out_shp = [len(self.fcast_times)] + list(t0_data.shape)  # KxM^xN
+        fcast_out_shp = [len(self.fcast_times), self._neigs, t0_data.shape[0]]
         fcast_out = zeros(fcast_out_shp)
         
         # Area Weighting if _lats is set
@@ -162,7 +163,8 @@ class LIM(object):
             for i, tau in enumerate(self.fcast_times):
                 g = g_1**tau
                 xf = dot(g, proj_t0_data)
-                fcast_out[i] = dot(xf.T, eofs.T)
+                #fcast_out[i] = dot(xf.T, eofs.T)
+                fcast_out[i] = xf
         
         # Forecasts using G only    
         else:
@@ -173,7 +175,8 @@ class LIM(object):
                 xt = train_data[:, tau:(train_tdim+tau)]
                 g = _calc_m(x0, xt)
                 xf = dot(g, proj_t0_data)
-                fcast_out[i] = dot(xf.T, eofs.T)
+                #fcast_out[i] = dot(xf.T, eofs.T)
+                fcast_out[i] = xf
         
         return fcast_out, eofs
 
@@ -187,17 +190,16 @@ class ResampleLIM(LIM):
                      area_wgt_lats, h5file)
 
         # Need original input dataset for resampling
-        self._original_obs = copy(self._calibration)
+        self._original_obs = copy(calibration)
         self._num_trials = num_trials
 
         # Initialize important indice limits for resampling procedure
-        _fcast_tdim = self.fcast_times[-1]
-        _sample_tdim = self._original_obs.shape[0]
+        _fcast_tdim = self.fcast_times[-1]*wsize
         # 2*self._wsize is to account for edge removal from running mean
-        _useable_tdim = (_sample_tdim - _fcast_tdim - 2*self._wsize)
+        _sample_tdim = self._original_obs.shape[0] - _fcast_tdim - 2*wsize
         hold_chk = int(ceil(_sample_tdim/self._wsize * hold_chk_pct))
-
         self._test_tdim = hold_chk * self._wsize
+        _useable_tdim = (_sample_tdim - self._test_tdim)
         self._trials_out_shp = [self._num_trials, len(self.fcast_times),
                                 self._neigs, self._test_tdim]
         self._test_start_idx = unique(linspace(0,
@@ -212,9 +214,9 @@ class ResampleLIM(LIM):
     def forecast(self, use_lag1=True, detrend_data=False):
 
         _fcast_out = zeros(self._trials_out_shp)
-        _eofs_out = zeros(self._num_trials,
-                          self._neigs,
-                          self._original_obs.shape[1])
+        _eofs_out = zeros((self._num_trials,
+                           self._original_obs.shape[1],
+                           self._neigs))
 
         for j, trial in enumerate(self._test_start_idx):
 
