@@ -195,6 +195,7 @@ class ResampleLIM(LIM):
 
         # Initialize important indice limits for resampling procedure
         _fcast_tdim = self.fcast_times[-1]*wsize
+
         # 2*self._wsize is to account for edge removal from running mean
         _sample_tdim = self._original_obs.shape[0] - _fcast_tdim - 2*wsize
         hold_chk = int(ceil(_sample_tdim/self._wsize * hold_chk_pct))
@@ -208,7 +209,9 @@ class ResampleLIM(LIM):
                                                ).astype(int16))
 
         # Calculate edge concatenation lengths for anomaly procedure
-        _, bedge, tedge = run_mean(calibration, wsize, shave_yr=True)
+        obs_run_mean, bedge, tedge = run_mean(calibration,
+                                              wsize,
+                                              shave_yr=True)
         self._anom_edges = [bedge, tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):
@@ -239,6 +242,10 @@ class ResampleLIM(LIM):
 
         return _fcast_out, _eofs_out
 
+    def save(self, filename):
+        # creates a new HDF5 File and saves contents
+        # should normally be called after forecast has run
+        pass
 
 # This class will be experimental at most.
 # Have to make the assumption that anomaly uses entire sample average

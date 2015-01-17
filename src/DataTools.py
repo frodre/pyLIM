@@ -25,5 +25,16 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
                                        shape=data.shape,
                                        createparents=True,
                                        **kwargs)
+        out_arr[:] = data
     except tb.NodeError:
-        pass
+        node_path = (group._v_pathname, '/', node)
+        h5file.remove_node(node_path)
+        out_arr = h5file.create_carray(group,
+                                       node,
+                                       atom=tb.Atom.from_dtype(data.dtype),
+                                       shape=data.shape,
+                                       createparents=True,
+                                       **kwargs)
+        out_arr[:] = data
+
+    return out_arr
