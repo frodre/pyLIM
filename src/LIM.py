@@ -4,9 +4,11 @@ from numpy import linspace, unique, concatenate
 from numpy.linalg import pinv
 from scipy.signal import detrend
 from math import ceil
+import tables as tb
 
 from Stats import calc_eofs, run_mean
 import LIMTools as Lt
+import DataTools as Dt
 
 
 def _area_wgt(data, lats):
@@ -180,6 +182,47 @@ class LIM(object):
         
         return fcast_out, eofs
 
+    def save(self, filename=None):
+        """
+        This function will attempt to save data from the LIM object into an
+        HDF5 pytables file.  I am currently using pytables because they provide
+        nice compression options, and the ability to perform out of core
+        operations.
+
+        WARNING: If filename already exists it will be overwritten!
+
+        :param filename: new HDF5 filename to store data
+        :return: created HDF5 file
+        """
+
+        if filename is not None:
+            assert(type(filename) == str)
+            self._H5file = tb.open_file(filename, mode='w',
+                                        filters=tb.Filters(complevel=2,
+                                                           complib='blosc'))
+            h5f = self._H5file
+        else:
+            assert(type(self._H5file) == tb.File)
+            h5f = self._H5file
+
+        try:
+            data_grp = h5f.create_group(h5f.root, 'data',
+                                        title='Observations & Forecast Data')
+        except tb.NodeError:
+            # group already exists
+            data_grp = h5f.root.data
+
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'obs', self._calibration,
+                              title='Observation Data')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs', self._anomaly_srs,
+                              title='Observation Anomaly Data')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'climo', self._climo,
+                              title='Monthly climatology from Obs')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'fcast_times', self.fcast_times,
+                              title='Forecast Lead Times')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
+                              title='Latitude Grid')
+
 
 class ResampleLIM(LIM):
 
@@ -190,7 +233,7 @@ class ResampleLIM(LIM):
                      area_wgt_lats, h5file)
 
         # Need original input dataset for resampling
-        self._original_obs = copy(calibration)
+        self._original_obs = self._calibration # potential erase reference
         self._num_trials = num_trials
 
         # Initialize important indice limits for resampling procedure
@@ -212,6 +255,8 @@ class ResampleLIM(LIM):
         obs_run_mean, bedge, tedge = run_mean(calibration,
                                               wsize,
                                               shave_yr=True)
+        self._full_anomaly_srs, self._full_climo = \
+            Lt.calc_anomaly(obs_run_mean, self._wsize)
         self._anom_edges = [bedge, tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):
@@ -242,10 +287,54 @@ class ResampleLIM(LIM):
 
         return _fcast_out, _eofs_out
 
-    def save(self, filename):
-        # creates a new HDF5 File and saves contents
-        # should normally be called after forecast has run
-        pass
+    def save(self, filename=None):
+        """
+        This function will attempt to save data from the LIM object into an
+        HDF5 pytables file.  I am currently using pytables because they provide
+        nice compression options, and the ability to perform out of core
+        operations.
+
+        WARNING: If filename already exists it will be overwritten!
+
+        :param filename: new HDF5 filename to store data
+        :return: created HDF5 file
+        """
+
+        if filename is not None:
+            assert(type(filename) == str)
+            self._H5file = tb.open_file(filename, mode='w',
+                                        filters=tb.Filters(complevel=2,
+                                                           complib='blosc'))
+            h5f = self._H5file
+        else:
+            assert(type(self._H5file) == tb.File)
+            h5f = self._H5file
+
+        try:
+            data_grp = h5f.create_group(h5f.root, 'data',
+                                        title='Observations & Forecast Data')
+        except tb.NodeError:
+            # group already exists
+            data_grp = h5f.root.data
+
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'obs', self._original_obs,
+                              title='Observation Data')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs',
+                              self._full_anomaly_srs,
+                              title='Observation Anomaly Data')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'climo', self._full_climo,
+                              title='Monthly climatology from Obs')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'fcast_times', self.fcast_times,
+                              title='Forecast Lead Times')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
+                              title='Latitude Grid')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'test_start_idxs',
+                              self._test_start_idx,
+                              title='Forecast Trial Starting Indices')
+        h5f.data_grp._v_attrs.test_tdim = self._test_tdim
+        h5f.data_grp._v_attrs.yrsize = self._wsize
+
+
 
 # This class will be experimental at most.
 # Have to make the assumption that anomaly uses entire sample average

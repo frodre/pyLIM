@@ -1,6 +1,6 @@
 __author__ = 'wperkins'
 
-import scipy.io.netcdf as ncf
+import scipy.io.netcdf as ncf #should use netcdf library
 import tables as tb
 
 
@@ -27,7 +27,7 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
                                        **kwargs)
         out_arr[:] = data
     except tb.NodeError:
-        node_path = (group._v_pathname, '/', node)
+        node_path = '/'.join(group._v_pathname, node)
         h5file.remove_node(node_path)
         out_arr = h5file.create_carray(group,
                                        node,
