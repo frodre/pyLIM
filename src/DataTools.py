@@ -38,3 +38,26 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
         out_arr[:] = data
 
     return out_arr
+
+
+def empty_hdf5_carray(h5file, group, node, atom, shape, **kwargs):
+    assert(type(h5file) == tb.File)
+
+    try:
+        out_arr = h5file.create_carray(group,
+                                       node,
+                                       atom=atom,
+                                       shape=shape,
+                                       createparents=True,
+                                       **kwargs)
+
+    except tb.NodeError:
+        node_path = '/'.join(group._v_pathname, node)
+        h5file.remove_node(node_path)
+        out_arr = h5file.create_carray(group,
+                                       node,
+                                       atom=atom,
+                                       shape=shape,
+                                       createparents=True,
+                                       **kwargs)
+    return out_arr

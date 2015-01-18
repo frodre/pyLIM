@@ -289,7 +289,7 @@ class ResampleLIM(LIM):
         hold_chk = int(ceil(_sample_tdim/self._wsize * hold_chk_pct))
         self._test_tdim = hold_chk * self._wsize
         _useable_tdim = (_sample_tdim - self._test_tdim)
-        self._trials_out_shp = [self._num_trials, len(self.fcast_times),
+        self._trials_out_shp = [len(self.fcast_times), self._num_trials,
                                 self._neigs, self._test_tdim]
         self._test_start_idx = unique(linspace(0,
                                                _useable_tdim,
@@ -306,10 +306,29 @@ class ResampleLIM(LIM):
 
     def forecast(self, use_lag1=True, detrend_data=False):
 
-        _fcast_out = zeros(self._trials_out_shp)
-        _eofs_out = zeros((self._num_trials,
-                           self._original_obs.shape[1],
-                           self._neigs))
+        eof_shp = [self._num_trials,
+                   self._original_obs.shape[1],
+                   self._neigs]
+        if self._H5file is not None:
+            h5f = self._H5file
+
+            _fcast_out = _create_h5_fcast_grps(h5f,
+                                               '/data/fcast_bin',
+                                               tb.Atom(self._original_obs.dtype,
+                                                       self._trials_out_shp[2:]),
+                                               self._trials_out_shp[1:],
+                                               self.fcast_times)
+            _eofs_out = Dt.empty_hdf5_carray(h5f,
+                                             '/data/',
+                                             'eofs',
+                                             atom=tb.Atom(self._original_obs.dtype,
+                                                          eof_shp[1:]),
+                                             shape=eof_shp,
+                                             title='Calculated EOFs by Trial')
+
+        else:
+            _fcast_out = zeros(self._trials_out_shp)
+            _eofs_out = zeros(eof_shp)
 
         for j, trial in enumerate(self._test_start_idx):
 
@@ -326,8 +345,15 @@ class ResampleLIM(LIM):
                                (top_idx + self._anom_edges[1])]
             self._calibration = train_set
 
-            _fcast, _eofs = LIM.forecast(self, test_set)
-            _fcast_out[j] = _fcast
+            _fcast, _eofs = LIM.forecast(self,
+                                         test_set,
+                                         detrend_data=detrend_data,
+                                         use_h5=False)
+
+            # Place forecasts in the right trial, for the corresponding
+            #   forecast bin.
+            for i, fcast_bin in enumerate(_fcast_out):
+                fcast_bin[j] = _fcast[i]
             _eofs_out[j] = _eofs
 
         return _fcast_out, _eofs_out
