@@ -32,6 +32,28 @@ def _calc_m(x0, xt):
     return dot(x0xt, pinv(x0x0))
 
 
+def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
+    try:
+        out_fcast = [h5f.create_carray(dest,
+                                       'f%i' % lead,
+                                       atom=atom,
+                                       shape=shape,
+                                       createparents=True,
+                                       title='%i Year Forecast' % lead)
+                     for lead in fcast_times]
+    except tb.NodeError:
+        for lead in fcast_times:
+            h5f.remove_node('/'.join(dest, 'f%i' % lead))
+            out_fcast = [h5f.create_carray(dest,
+                                           'f%i' % lead,
+                                           atom=atom,
+                                           shape=shape,
+                                           createparents=True,
+                                           title='%i Year Forecast' % lead)
+                         for lead in fcast_times]
+    return out_fcast
+
+
 class LIM(object):
     """Linear inverse forecast model.
     
@@ -70,7 +92,8 @@ class LIM(object):
             be equal to a year's worth of samples
         fcast_times: array_like
             1D array-like object containing all times to forecast at with the
-            LIM.
+            LIM. Times should be in wsize units. i.e. 1yr forecast should
+            be integer value "1" not 12 (if wsize=12).
         fcast_num_pcs: int
             Number of principal components to include in forecast calculations
         area_wgt_lats: ndarray, Optional
@@ -90,7 +113,8 @@ class LIM(object):
         self._H5file = h5file
         self._obs_use = self._anomaly_srs = self._climo = None
 
-    def forecast(self, t0_data, use_lag1=True, detrend_data=False):
+    def forecast(self, t0_data, use_lag1=True, detrend_data=False,
+                 use_h5=True):
         """Run LIM forecast from given data.
         
         Performs LIM forecast over the times specified by the
@@ -106,17 +130,26 @@ class LIM(object):
             each edge from the anomaly calculation procedure.  M^ = M - 2*wsize
         use_lag1: bool
             Flag for using only the G_1-matrix for forecasting
+        detrend_data: bool
+            Apply linear detrending to anomaly timeseries data
+        use_h5: bool
+            Use H5file to store forecast data instead of an ndarray.
+
             
         Returns
         -----
-        fcast_out: ndarray
-            LIM forecasts in a KxM^xN matrix where K corresponds to each
+        fcast_out: ndarray-like
+            LIM forecasts in a KxJxM^ matrix where K corresponds to each
             forecast time.
+        eofs: ndarray-like
+            EOFs for converting forecast output between EOF and physical
+            space.  Returned in an NxJ matrix.
+
             
         Notes
         -----
         This method will set the fcast_out attribute for the LIM. If an HDF5
-        obj is provided it will output the forecast to this file.
+        obj is provided it will output the forecast to this file if desired.
         """
 
         # Calculate anomaly time series from the data
@@ -130,11 +163,19 @@ class LIM(object):
         # Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
         t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize, self._climo)  # M^xN
-        
-        # This will be replaced with HDF5 stuff if provided
-        #fcast_out_shp = [len(self.fcast_times)] + list(t0_data.shape)  # KxM^xN
+
+        # Create output locations for our forecasts
         fcast_out_shp = [len(self.fcast_times), self._neigs, t0_data.shape[0]]
-        fcast_out = zeros(fcast_out_shp)
+        if self._H5file is not None and use_h5:
+            h5f = self._H5file
+            # Create forecast groups
+            fcast_out = _create_h5_fcast_grps(h5f,
+                                              '/data/fcast_bin',
+                                              fcast_out_shp[1:],
+                                              tb.Atom.from_dtype(t0_data.dtype),
+                                              self.fcast_times)
+        else:
+            fcast_out = zeros(fcast_out_shp)
         
         # Area Weighting if _lats is set
         if self._lats is not None:
@@ -165,7 +206,6 @@ class LIM(object):
             for i, tau in enumerate(self.fcast_times):
                 g = g_1**tau
                 xf = dot(g, proj_t0_data)
-                #fcast_out[i] = dot(xf.T, eofs.T)
                 fcast_out[i] = xf
         
         # Forecasts using G only    
@@ -177,10 +217,15 @@ class LIM(object):
                 xt = train_data[:, tau:(train_tdim+tau)]
                 g = _calc_m(x0, xt)
                 xf = dot(g, proj_t0_data)
-                #fcast_out[i] = dot(xf.T, eofs.T)
                 fcast_out[i] = xf
-        
-        return fcast_out, eofs
+
+        # Save EOFs to HDF5 file if needed
+        if self._H5file is not None and use_h5:
+            eof_out = Dt.var_to_hdf5_carray(h5f, '/data', 'eofs', eofs)
+        else:
+            eof_out = eofs
+
+        return fcast_out, eof_out
 
     def save(self, filename=None):
         """
