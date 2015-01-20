@@ -2,6 +2,7 @@ import LIM
 import numpy as np
 import tables as tb
 import scipy.io.netcdf as ncf
+import os
 
 # if os.name == 'nt':
 #     fname = "G:/Hakim Research/data/Trend_LIM_data.h5"
@@ -14,7 +15,11 @@ import scipy.io.netcdf as ncf
 # lons = f.root.data.lons.read()
 # lats, lons = np.meshgrid(lats, lons, indexing='ij')
 
-f = ncf.netcdf_file('G:/Hakim Research/data/20CR/air.2m.mon.mean.nc', 'r')
+if os.name == 'nt':
+    f = ncf.netcdf_file('G:/Hakim Research/data/20CR/air.2m.mon.mean.nc', 'r')
+else:
+    f = ncf.netcdf_file('/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc', 'r')
+
 tvar = f.variables['air']
 lats = f.variables['lat'].data
 lons = f.variables['lon'].data
@@ -56,7 +61,7 @@ lons = lons.flatten()
 #     test_LIM.save(h5f3)
 #     test_re_LIM.save()
 #     out1 = test_LIM.forecast(test_dat, detrend_data=True)
-#     out2 = test_LIM.forecast(test_dat)
+#     out2 = test_LIM.forecast(test_dat, detrend_data=True)
 #     out3 = test_re_LIM.forecast(detrend_data=True)
 # finally:
 #     h5f.close()
@@ -77,8 +82,13 @@ try:
     reg = np.dot(reg_fcast.T, reg_eofs.T)
     res = np.dot(res_fcast[0].T, res_eofs[0].T)
 
+    diff = reg - res
+    print np.abs(diff).max()
+
     assert(reg.shape == res.shape)
-    assert(np.allclose(reg, res))
+    assert(np.allclose(res_eofs[0], reg_eofs))
+    assert(np.allclose(res_fcast[0], reg_fcast))
+    assert(np.allclose(reg, res, atol=1e-6))
 finally:
     h5f2.close()
     h5f3.close()

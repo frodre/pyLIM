@@ -1,6 +1,6 @@
 #-*- coding: utf-8 -*-
 from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16, copy
-from numpy import linspace, unique, concatenate
+from numpy import linspace, unique, concatenate, copy
 from numpy.linalg import pinv
 from scipy.signal import detrend
 from math import ceil
@@ -292,7 +292,7 @@ class ResampleLIM(LIM):
                      area_wgt_lats, lons, h5file)
 
         # Need original input dataset for resampling
-        self._original_obs = self._calibration # potential erase reference
+        self._original_obs = copy(self._calibration)  # potential erase reference
         self._num_trials = num_trials
 
         # Initialize important indice limits for resampling procedure
