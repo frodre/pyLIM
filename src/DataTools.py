@@ -23,41 +23,52 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
                                        node,
                                        atom=tb.Atom.from_dtype(data.dtype),
                                        shape=data.shape,
-                                       createparents=True,
                                        **kwargs)
         out_arr[:] = data
     except tb.NodeError:
-        node_path = '/'.join(group._v_pathname, node)
+        if type(group) == tb.Group:
+            node_path = '/'.join((group._v_pathname, node))
+        elif type(group) == str:
+            node_path = '/'.join((group, node))
+        else:
+            raise TypeError('Expected group type of tables.Group or str.')
+
         h5file.remove_node(node_path)
         out_arr = h5file.create_carray(group,
                                        node,
                                        atom=tb.Atom.from_dtype(data.dtype),
                                        shape=data.shape,
-                                       createparents=True,
                                        **kwargs)
         out_arr[:] = data
 
     return out_arr
 
 
-def empty_hdf5_carray(h5file, group, node, atom, shape, **kwargs):
+def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
     assert(type(h5file) == tb.File)
+
+    # kwargs['atom'] = in_atom
+    # kwargs['shape'] = shape
 
     try:
         out_arr = h5file.create_carray(group,
                                        node,
-                                       atom=atom,
+                                       atom=in_atom,
                                        shape=shape,
-                                       createparents=True,
                                        **kwargs)
 
     except tb.NodeError:
-        node_path = '/'.join(group._v_pathname, node)
+        if type(group) == tb.Group:
+            node_path = '/'.join((group._v_pathname, node))
+        elif type(group) == str:
+            node_path = '/'.join((group, node))
+        else:
+            raise TypeError('Expected group type of tables.Group or str.')
+
         h5file.remove_node(node_path)
         out_arr = h5file.create_carray(group,
                                        node,
-                                       atom=atom,
+                                       atom=in_atom,
                                        shape=shape,
-                                       createparents=True,
                                        **kwargs)
     return out_arr

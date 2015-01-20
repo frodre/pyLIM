@@ -43,14 +43,14 @@ def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
                      for lead in fcast_times]
     except tb.NodeError:
         for lead in fcast_times:
-            h5f.remove_node('/'.join(dest, 'f%i' % lead))
-            out_fcast = [h5f.create_carray(dest,
-                                           'f%i' % lead,
-                                           atom=atom,
-                                           shape=shape,
-                                           createparents=True,
-                                           title='%i Year Forecast' % lead)
-                         for lead in fcast_times]
+            h5f.remove_node('/'.join((dest, 'f%i' % lead)))
+        out_fcast = [h5f.create_carray(dest,
+                                       'f%i' % lead,
+                                       atom=atom,
+                                       shape=shape,
+                                       createparents=True,
+                                       title='%i Year Forecast' % lead)
+                     for lead in fcast_times]
     return out_fcast
 
 
@@ -79,7 +79,7 @@ class LIM(object):
     """
     
     def __init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
-                 area_wgt_lats=None, h5file=None):
+                 area_wgt_lats=None, lons=None, h5file=None):
         """
         Parameters
         ----------
@@ -100,6 +100,8 @@ class LIM(object):
             Latitude vector pertaining to spatial dimension N.  If used area-
             weighting will be performed for pricipal component calculations.
             TODO: add ability to provide a simple non-tiled lat vector
+        lons: ndarray, Optional
+            Longitude vector flattened to spatial dimension N.
         H5file: HDF5_Object, Optional
             File object to store LIM output.  It will create a series of 
             directories under the given group
@@ -110,6 +112,7 @@ class LIM(object):
         self.fcast_times = array(fcast_times, dtype=int16)
         self._neigs = fcast_num_pcs
         self._lats = area_wgt_lats
+        self._lons = lons
         self._H5file = h5file
         self._obs_use = self._anomaly_srs = self._climo = None
 
@@ -171,8 +174,8 @@ class LIM(object):
             # Create forecast groups
             fcast_out = _create_h5_fcast_grps(h5f,
                                               '/data/fcast_bin',
-                                              fcast_out_shp[1:],
                                               tb.Atom.from_dtype(t0_data.dtype),
+                                              fcast_out_shp[1:],
                                               self.fcast_times)
         else:
             fcast_out = zeros(fcast_out_shp)
@@ -242,6 +245,9 @@ class LIM(object):
 
         if filename is not None:
             assert(type(filename) == str)
+
+            if self._H5file is not None:
+                self._H5file.close()
             self._H5file = tb.open_file(filename, mode='w',
                                         filters=tb.Filters(complevel=2,
                                                            complib='blosc'))
@@ -259,23 +265,29 @@ class LIM(object):
 
         Dt.var_to_hdf5_carray(h5f, data_grp, 'obs', self._calibration,
                               title='Observation Data')
-        Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs', self._anomaly_srs,
-                              title='Observation Anomaly Data')
-        Dt.var_to_hdf5_carray(h5f, data_grp, 'climo', self._climo,
-                              title='Monthly climatology from Obs')
+        if self._anomaly_srs is not None:
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs',
+                                  self._anomaly_srs,
+                                  title='Observation Anomaly Data')
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'climo', self._climo,
+                                  title='Monthly climatology from Obs')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'fcast_times', self.fcast_times,
                               title='Forecast Lead Times')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
                               title='Latitude Grid')
+        if self._lons is not None:
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
+                                  title='Longitude Grid')
 
 
 class ResampleLIM(LIM):
 
     def __init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
-                 hold_chk_pct, num_trials, area_wgt_lats=None, h5file=None):
+                 hold_chk_pct, num_trials, area_wgt_lats=None, lons=None,
+                 h5file=None):
 
         LIM.__init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
-                     area_wgt_lats, h5file)
+                     area_wgt_lats, lons, h5file)
 
         # Need original input dataset for resampling
         self._original_obs = self._calibration # potential erase reference
@@ -312,18 +324,19 @@ class ResampleLIM(LIM):
         if self._H5file is not None:
             h5f = self._H5file
 
+            fcast_atom = tb.Atom.from_dtype(self._original_obs.dtype)
+            eof_atom = tb.Atom.from_dtype(self._original_obs.dtype)
+
             _fcast_out = _create_h5_fcast_grps(h5f,
                                                '/data/fcast_bin',
-                                               tb.Atom(self._original_obs.dtype,
-                                                       self._trials_out_shp[2:]),
+                                               fcast_atom,
                                                self._trials_out_shp[1:],
                                                self.fcast_times)
             _eofs_out = Dt.empty_hdf5_carray(h5f,
                                              '/data/',
                                              'eofs',
-                                             atom=tb.Atom(self._original_obs.dtype,
-                                                          eof_shp[1:]),
-                                             shape=eof_shp,
+                                             eof_atom,
+                                             eof_shp,
                                              title='Calculated EOFs by Trial')
 
         else:
@@ -373,6 +386,9 @@ class ResampleLIM(LIM):
 
         if filename is not None:
             assert(type(filename) == str)
+            if self._H5file is not None:
+                self._H5file.close()
+
             self._H5file = tb.open_file(filename, mode='w',
                                         filters=tb.Filters(complevel=2,
                                                            complib='blosc'))
@@ -399,11 +415,14 @@ class ResampleLIM(LIM):
                               title='Forecast Lead Times')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
                               title='Latitude Grid')
+        if self._lons is not None:
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
+                                  title='Longitude Grid')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'test_start_idxs',
                               self._test_start_idx,
                               title='Forecast Trial Starting Indices')
-        h5f.data_grp._v_attrs.test_tdim = self._test_tdim
-        h5f.data_grp._v_attrs.yrsize = self._wsize
+        data_grp._v_attrs.test_tdim = self._test_tdim
+        data_grp._v_attrs.yrsize = self._wsize
 
 
 

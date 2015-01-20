@@ -1,7 +1,6 @@
 import LIM
-import tables as tb
 import numpy as np
-import os
+import tables as tb
 import scipy.io.netcdf as ncf
 
 # if os.name == 'nt':
@@ -42,9 +41,23 @@ sample_tdim = len(train_data) - 9*yr
 #lats = f.root.data.lats.read()
 #lons = f.root.data.lons.read()
 lats = lats.flatten()
+lons = lons.flatten()
 
-#test_LIM = LIM.LIM(train_data, yr, range(10), 20, area_wgt_lats=lats)
-test_LIM = LIM.ResampleLIM(obs, yr, [1, 2], 20, 0.1, 10, area_wgt_lats=lats)
-out = test_LIM.forecast(test_dat)
+try:
+    h5f = tb.open_file('test.h5', mode='w')
+    h5f2 = tb.open_file('test2.h5', mode='w')
 
-f.close()
+    test_LIM = LIM.LIM(train_data, yr, [1, 2], 20, area_wgt_lats=lats,
+                       h5file=h5f)
+    test_re_LIM = LIM.ResampleLIM(obs, yr, [1, 2], 20, 0.1, 1, area_wgt_lats=lats,
+                                  lons=lons, h5file=h5f2)
+    test_LIM.save()
+    test_LIM.save('test3.h5')
+    test_re_LIM.save()
+    out1 = test_LIM.forecast(test_dat, detrend_data=True)
+    out2 = test_LIM.forecast(test_dat)
+    out3 = test_re_LIM.forecast(detrend_data=True)
+finally:
+    h5f.close()
+    h5f2.close()
+    f.close()
