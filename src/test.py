@@ -33,8 +33,8 @@ spatial_shp = obs.shape[1:]
 obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
 
 yr = 12
-test_dat = obs[0:yr*15]
-train_data = np.concatenate((obs[0:yr], obs[yr*14:]), axis=0)
+test_dat = obs[0:yr*16]
+train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
 sample_tdim = len(train_data) - 9*yr
 #train_data = train_data[0:sample_tdim]  #Calibration dataset
 
@@ -43,21 +43,42 @@ sample_tdim = len(train_data) - 9*yr
 lats = lats.flatten()
 lons = lons.flatten()
 
-try:
-    h5f = tb.open_file('test.h5', mode='w')
-    h5f2 = tb.open_file('test2.h5', mode='w')
+# try:
+#     h5f = tb.open_file('test.h5', mode='w')
+#     h5f2 = tb.open_file('test2.h5', mode='w')
+#     h5f3 = tb.open_file('test3.h5', mode='w')
+#
+#     test_LIM = LIM.LIM(train_data, yr, [1, 2], 20, area_wgt_lats=lats,
+#                        h5file=h5f)
+#     test_re_LIM = LIM.ResampleLIM(obs, yr, [1, 2], 20, 0.1, 1, area_wgt_lats=lats,
+#                                   lons=lons, h5file=h5f2)
+#     test_LIM.save()
+#     test_LIM.save(h5f3)
+#     test_re_LIM.save()
+#     out1 = test_LIM.forecast(test_dat, detrend_data=True)
+#     out2 = test_LIM.forecast(test_dat)
+#     out3 = test_re_LIM.forecast(detrend_data=True)
+# finally:
+#     h5f.close()
+#     h5f2.close()
+#     h5f3.close()
+#     f.close()
 
-    test_LIM = LIM.LIM(train_data, yr, [1, 2], 20, area_wgt_lats=lats,
-                       h5file=h5f)
-    test_re_LIM = LIM.ResampleLIM(obs, yr, [1, 2], 20, 0.1, 1, area_wgt_lats=lats,
-                                  lons=lons, h5file=h5f2)
-    test_LIM.save()
-    test_LIM.save('test3.h5')
-    test_re_LIM.save()
-    out1 = test_LIM.forecast(test_dat, detrend_data=True)
-    out2 = test_LIM.forecast(test_dat)
-    out3 = test_re_LIM.forecast(detrend_data=True)
+try:
+    h5f2 = tb.open_file('test2.h5', 'r')
+    h5f3 = tb.open_file('test3.h5', 'r')
+
+    reg_fcast = h5f3.root.data.fcast_bin.f1[:]
+    res_fcast = h5f2.root.data.fcast_bin.f1[:]
+
+    reg_eofs = h5f3.root.data.eofs[:]
+    res_eofs = h5f2.root.data.eofs[:]
+
+    reg = np.dot(reg_fcast.T, reg_eofs.T)
+    res = np.dot(res_fcast[0].T, res_eofs[0].T)
+
+    assert(reg.shape == res.shape)
+    assert(np.allclose(reg, res))
 finally:
-    h5f.close()
     h5f2.close()
-    f.close()
+    h5f3.close()

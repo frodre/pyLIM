@@ -209,7 +209,10 @@ class LIM(object):
             for i, tau in enumerate(self.fcast_times):
                 g = g_1**tau
                 xf = dot(g, proj_t0_data)
-                fcast_out[i] = xf
+                if use_h5:
+                    fcast_out[i][:] = xf
+                else:
+                    fcast_out[i] = xf
         
         # Forecasts using G only    
         else:
@@ -220,7 +223,10 @@ class LIM(object):
                 xt = train_data[:, tau:(train_tdim+tau)]
                 g = _calc_m(x0, xt)
                 xf = dot(g, proj_t0_data)
-                fcast_out[i] = xf
+                if use_h5:
+                    fcast_out[i][:] = xf
+                else:
+                    fcast_out[i] = xf
 
         # Save EOFs to HDF5 file if needed
         if self._H5file is not None and use_h5:
@@ -230,27 +236,23 @@ class LIM(object):
 
         return fcast_out, eof_out
 
-    def save(self, filename=None):
+    def save(self, h5file=None):
         """
         This function will attempt to save data from the LIM object into an
         HDF5 pytables file.  I am currently using pytables because they provide
         nice compression options, and the ability to perform out of core
         operations.
 
-        WARNING: If filename already exists it will be overwritten!
-
-        :param filename: new HDF5 filename to store data
+        :param h5file: new HDF5 file to store data
         :return: created HDF5 file
         """
 
-        if filename is not None:
-            assert(type(filename) == str)
+        if h5file is not None:
+            assert(type(h5file) == tb.File)
 
             if self._H5file is not None:
                 self._H5file.close()
-            self._H5file = tb.open_file(filename, mode='w',
-                                        filters=tb.Filters(complevel=2,
-                                                           complib='blosc'))
+                self._H5file = h5file
             h5f = self._H5file
         else:
             assert(type(self._H5file) == tb.File)
@@ -371,7 +373,7 @@ class ResampleLIM(LIM):
 
         return _fcast_out, _eofs_out
 
-    def save(self, filename=None):
+    def save(self, h5file=None):
         """
         This function will attempt to save data from the LIM object into an
         HDF5 pytables file.  I am currently using pytables because they provide
@@ -380,18 +382,16 @@ class ResampleLIM(LIM):
 
         WARNING: If filename already exists it will be overwritten!
 
-        :param filename: new HDF5 filename to store data
+        :param h5file: new HDF5 file to store data
         :return: created HDF5 file
         """
 
-        if filename is not None:
-            assert(type(filename) == str)
+        if h5file is not None:
+            assert(type(h5file) == tb.File)
+
             if self._H5file is not None:
                 self._H5file.close()
-
-            self._H5file = tb.open_file(filename, mode='w',
-                                        filters=tb.Filters(complevel=2,
-                                                           complib='blosc'))
+                self._H5file = h5file
             h5f = self._H5file
         else:
             assert(type(self._H5file) == tb.File)
