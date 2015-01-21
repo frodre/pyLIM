@@ -57,19 +57,28 @@ def run_mean(data, window_size, h5_file=None, h5_parent=None, shave_yr=False):
 
     if h5_file is not None:
         is_h5 = True
+        node_name = 'run_mean'
+
         if h5_parent is None:
             h5_parent = h5_file.root
         
         try:
             result = h5_file.create_carray(h5_parent, 
-                                           'run_mean',
+                                           node_name,
                                            atom=tb.Atom.from_dtype(data.dtype),
                                            shape=new_shape,
                                            title='12-month running mean')
         except tb.NodeError:
-            h5_file.remove_node(h5_parent.run_mean)
+            if type(h5_parent) == tb.Group:
+                node_path = '/'.join((h5_parent._v_pathname, node_name))
+            elif type(h5_parent) == str:
+                node_path = '/'.join((h5_parent, node_name))
+            else:
+                raise TypeError('Expected group type of tables.Group or str.')
+
+            h5_file.remove_node(node_path)
             result = h5_file.create_carray(h5_parent, 
-                                           'run_mean',
+                                           node_name,
                                            atom=tb.Atom.from_dtype(data.dtype),
                                            shape=new_shape,
                                            title='12-month running mean')
@@ -130,7 +139,9 @@ def calc_ce(fcast, trial_obs, obs):
     obs: ndarray
         Time series of observations. M x N
     """  # TODO: Finish returns
-     
+
+    assert(fcast.shape == trial_obs.shape)
+
     cvar = obs.var(axis=0)
     error = ne.evaluate('(trial_obs - fcast)**2')
     evar = error.sum(axis=0)/(len(error))

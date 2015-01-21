@@ -2,6 +2,7 @@ import os
 import tables as tb
 import numpy as np
 import Stats as St
+import DataTools as Dt
 import matplotlib.pyplot as plt
 import scipy.io.netcdf as ncf
 from mpl_toolkits.basemap import Basemap
@@ -72,47 +73,44 @@ def fcast_corr(h5file):
 
 
 def fcast_ce(h5file):
-    leaf_name = 'ce_check' 
-    h5_datagrp = h5file.root.data
-    obs = h5_datagrp.anomaly_srs.read()
-    test_start_idxs = h5_datagrp.test_idxs.read()
-    yrsize = h5_datagrp.fcast_bin._v_attrs.yrsize
-    test_tdim = h5_datagrp.fcast_bin._v_attrs.test_tdim
-    nfcasts = h5_datagrp.fcast_bin._v_nchildren
-    try:
-        ces = h5file.create_carray('/stats', leaf_name,
-                                   atom=tb.Atom.from_dtype(obs.dtype),
-                                   shape=(nfcasts, obs.shape[1]),
-                                   title="Coefficient of Efficiency",
-                                   createparents=True)
-    except tb.NodeError:
-        h5file.remove_node(h5file.root.stats, leaf_name)
-        ces = h5file.create_carray('/stats', leaf_name,
-                                   atom=tb.Atom.from_dtype(obs.dtype),
-                                   shape=(nfcasts, obs.shape[1]),
-                                   title="Coefficient of Efficiency",
-                                   createparents=True)
-    except tb.FileModeError:
-        ces = np.zeros((nfcasts, obs.shape[1]))
+    node_name = 'ce'
+    parent = '/stats'
 
-    fcasts = h5file.list_nodes(h5_datagrp.fcast_bin)
-    for i, fcast in enumerate(fcasts):
-        print 'Calculating CE: %i yr fcast' % i
-        compiled_obs = build_obs(obs, test_start_idxs, i*yrsize, test_tdim)
-        ces[i] = St.calc_ce(fcast.read(), compiled_obs, obs)
-        
-        #ce_tmp = np.zeros( obs.shape[1] )
-        #for j, start_idx in enumerate(test_start_idxs):
-        #    compiled_obs = build_obs(obs, [start_idx], i*yrsize, test_tdim)
-        #    start = j*test_tdim
-        #    end = j*test_tdim + test_tdim
-        #    fcast_chunk = fcast[start:end]
-        #    ce_tmp += st.calcCE(fcast_chunk, compiled_obs, obs.var(axis=0))
-        #
-        #ces[i] = ce_tmp/len(test_start_idxs)
-        #print "Averaging, len %i, j %i" % (len(test_start_idxs), j+1)
+    assert(h5file is not None and type(h5file) == tb.File)
+
+    try:
+        obs = h5file.root.data.anomaly_srs[:]
+        test_start_idxs = h5file.root.data.test_start_idxs[:]
+        fcast_times = h5file.root.data.fcast_times[:]
+        fcasts = h5file.list_nodes(h5file.root.data.fcast_bin)
+        eofs = h5file.root.data.eofs[:]
+        yrsize = h5file.root.data._v_attrs.yrsize
+        test_tdim = h5file.root.data._v_attrs.test_tdim
+    except tb.NodeError as e:
+        raise type(e)(e.message + ' Returning without finishing operation...')
+        return None
+
+    atom = tb.Atom.from_dtype(obs.dtype)
+    ce_shp = [len(fcast_times), obs.shape[1]]
+
+    try:
+        ce_out = Dt.empty_hdf5_carray(h5file, parent, node_name, atom, ce_shp,
+                                      title="Spatial Coefficient of Efficiency",
+                                      createparents=True)
+    except tb.FileModeError:
+        ce_out = np.zeros(ce_shp)
+
+    for i, lead in enumerate(fcast_times):
+        print 'Calculating CE: %i yr fcast' % lead
+        compiled_obs = build_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
+        data = fcasts[i].read()
+        for j, trial in enumerate(data):
+            phys_fcast = np.dot(trial.T, eofs[j].T)
+            ce_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
+
+        ce_out[i] /= float(len(data))
     
-    return ces
+    return ce_out
 
 
 def calc_anomaly(data, yrsize, climo=None):
@@ -121,17 +119,12 @@ def calc_anomaly(data, yrsize, climo=None):
     if climo is None:
         climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
     anomaly = data.reshape(new_shp) - climo
-    return (anomaly.reshape(old_shp), climo)
+    return anomaly.reshape(old_shp), climo
 
 
 def build_obs(obs, start_idxs, tau, test_dim):
-    obs_data = np.zeros((len(start_idxs)*test_dim, obs.shape[1]),
-                        dtype=obs.dtype)
-    
-    for i, idx in enumerate(start_idxs):
-        start = i*test_dim
-        end = i*test_dim + test_dim
-        obs_data[start:end] = obs[idx+tau:idx+tau+test_dim]
+
+    obs_data = np.array([obs[(idx+tau):(idx+tau+test_dim)] for idx in start_idxs])
         
     return obs_data
 

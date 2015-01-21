@@ -159,6 +159,7 @@ class LIM(object):
         self._anomaly_srs, _bedge, _tedge = run_mean(self._calibration,
                                                      self._wsize,
                                                      self._H5file,
+                                                     h5_parent='/data',
                                                      shave_yr=True)
         self._anomaly_srs, self._climo = Lt.calc_anomaly(self._anomaly_srs,
                                                          self._wsize)

@@ -47,9 +47,6 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
 def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
     assert(type(h5file) == tb.File)
 
-    # kwargs['atom'] = in_atom
-    # kwargs['shape'] = shape
-
     try:
         out_arr = h5file.create_carray(group,
                                        node,

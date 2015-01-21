@@ -40,7 +40,7 @@ obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
 yr = 12
 test_dat = obs[0:yr*16]
 train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
-sample_tdim = len(train_data) - 9*yr
+#sample_tdim = len(train_data) - 9*yr
 #train_data = train_data[0:sample_tdim]  #Calibration dataset
 
 #lats = f.root.data.lats.read()
@@ -69,26 +69,43 @@ lons = lons.flatten()
 #     h5f3.close()
 #     f.close()
 
+# Test that forecasts of LIM and ResampleLIM give same results on same data
+# try:
+#     h5f2 = tb.open_file('test2.h5', 'r')
+#     h5f3 = tb.open_file('test3.h5', 'r')
+#
+#     reg_fcast = h5f3.root.data.fcast_bin.f1[:]
+#     res_fcast = h5f2.root.data.fcast_bin.f1[:]
+#
+#     reg_eofs = h5f3.root.data.eofs[:]
+#     res_eofs = h5f2.root.data.eofs[:]
+#
+#     reg = np.dot(reg_fcast.T, reg_eofs.T)
+#     res = np.dot(res_fcast[0].T, res_eofs[0].T)
+#
+#     diff = reg - res
+#     print np.abs(diff).max()
+#
+#     assert(reg.shape == res.shape)
+#     assert(np.allclose(res_eofs[0], reg_eofs))
+#     assert(np.allclose(res_fcast[0], reg_fcast))
+#     assert(np.allclose(reg, res, atol=1e-6))
+# finally:
+#     h5f2.close()
+#     h5f3.close()
+
 try:
-    h5f2 = tb.open_file('test2.h5', 'r')
-    h5f3 = tb.open_file('test3.h5', 'r')
+    ftimes = range(1, 10) # 1 - 9 yr forecasts
+    neigs = 20 # num PCs for EOFs
+    hold_frac = 0.1  # fraction of data to withold for resample tests
+    numTrials = 140
+    h5f = tb.open_file('1871_2012_Newm_Resample.h5', 'a')
 
-    reg_fcast = h5f3.root.data.fcast_bin.f1[:]
-    res_fcast = h5f2.root.data.fcast_bin.f1[:]
-
-    reg_eofs = h5f3.root.data.eofs[:]
-    res_eofs = h5f2.root.data.eofs[:]
-
-    reg = np.dot(reg_fcast.T, reg_eofs.T)
-    res = np.dot(res_fcast[0].T, res_eofs[0].T)
-
-    diff = reg - res
-    print np.abs(diff).max()
-
-    assert(reg.shape == res.shape)
-    assert(np.allclose(res_eofs[0], reg_eofs))
-    assert(np.allclose(res_fcast[0], reg_fcast))
-    assert(np.allclose(reg, res, atol=1e-6))
+    resample = LIM.ResampleLIM(obs, yr, range(1, 10), neigs, hold_frac, numTrials,
+                               area_wgt_lats=lats,
+                               lons=lons,
+                               h5file=h5f)
+    #resample.forecast()
+    resample.save()
 finally:
-    h5f2.close()
-    h5f3.close()
+    h5f.close()
