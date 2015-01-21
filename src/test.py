@@ -95,17 +95,17 @@ lons = lons.flatten()
 #     h5f3.close()
 
 try:
-    ftimes = range(1, 10) # 1 - 9 yr forecasts
-    neigs = 20 # num PCs for EOFs
+    ftimes = range(1, 10)  # 1 - 9 yr forecasts
+    neigs = 20  # num PCs for EOFs
     hold_frac = 0.1  # fraction of data to withold for resample tests
     numTrials = 140
-    h5f = tb.open_file('1871_2012_Newm_Resample.h5', 'a')
+    h5f = tb.open_file('trials_1yr.h5', 'w')
 
-    resample = LIM.ResampleLIM(obs, yr, range(1, 10), neigs, hold_frac, numTrials,
+    resample = LIM.ResampleLIM(obs, yr, [1], neigs, hold_frac, numTrials,
                                area_wgt_lats=lats,
                                lons=lons,
                                h5file=h5f)
-    #resample.forecast()
+    resample.forecast()
     resample.save()
 finally:
     h5f.close()
