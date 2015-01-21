@@ -144,7 +144,7 @@ def calc_ce(fcast, trial_obs, obs):
 
     cvar = obs.var(axis=0)
     error = ne.evaluate('(trial_obs - fcast)**2')
-    evar = error.sum(axis=0)/(len(error))
+    evar = error.sum(axis=0)/float(len(error))
     return 1 - evar/cvar
 
 

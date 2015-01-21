@@ -1,6 +1,7 @@
 import LIM
 import numpy as np
 import tables as tb
+import LIMTools as Lt
 import scipy.io.netcdf as ncf
 import os
 
@@ -15,38 +16,38 @@ import os
 # lons = f.root.data.lons.read()
 # lats, lons = np.meshgrid(lats, lons, indexing='ij')
 
-if os.name == 'nt':
-    f = ncf.netcdf_file('G:/Hakim Research/data/20CR/air.2m.mon.mean.nc', 'r')
-else:
-    f = ncf.netcdf_file('/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc', 'r')
-
-tvar = f.variables['air']
-lats = f.variables['lat'].data
-lons = f.variables['lon'].data
-lats, lons = np.meshgrid(lats, lons, indexing='ij')
-
-#account for data storage as int * scale + offset
-try:
-    sf = tvar.scale_factor
-    offset = tvar.add_offset
-    obs = tvar.data*sf + offset
-except AttributeError:
-    obs = tvar.data
-    
-#flatten t-data
-spatial_shp = obs.shape[1:]
-obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
-
-yr = 12
-test_dat = obs[0:yr*16]
-train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
-#sample_tdim = len(train_data) - 9*yr
-#train_data = train_data[0:sample_tdim]  #Calibration dataset
-
-#lats = f.root.data.lats.read()
-#lons = f.root.data.lons.read()
-lats = lats.flatten()
-lons = lons.flatten()
+# if os.name == 'nt':
+#     f = ncf.netcdf_file('G:/Hakim Research/data/20CR/air.2m.mon.mean.nc', 'r')
+# else:
+#     f = ncf.netcdf_file('/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc', 'r')
+#
+# tvar = f.variables['air']
+# lats = f.variables['lat'].data
+# lons = f.variables['lon'].data
+# lats, lons = np.meshgrid(lats, lons, indexing='ij')
+#
+# #account for data storage as int * scale + offset
+# try:
+#     sf = tvar.scale_factor
+#     offset = tvar.add_offset
+#     obs = tvar.data*sf + offset
+# except AttributeError:
+#     obs = tvar.data
+#
+# #flatten t-data
+# spatial_shp = obs.shape[1:]
+# obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
+#
+# yr = 12
+# test_dat = obs[0:yr*16]
+# train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
+# #sample_tdim = len(train_data) - 9*yr
+# #train_data = train_data[0:sample_tdim]  #Calibration dataset
+#
+# #lats = f.root.data.lats.read()
+# #lons = f.root.data.lons.read()
+# lats = lats.flatten()
+# lons = lons.flatten()
 
 # try:
 #     h5f = tb.open_file('test.h5', mode='w')
@@ -107,5 +108,22 @@ try:
                                h5file=h5f)
     resample.forecast()
     resample.save()
+finally:
+    h5f.close()
+
+try:
+    h5f = tb.open_file('1871_2012_Newm_Resample.h5', 'r')
+    shp = (94, 192)
+    lats = h5f.root.data.lats[:].reshape(shp)
+    lons = h5f.root.data.lons[:].reshape(shp)
+    test_idx = h5f.root.data.test_start_idxs[:]
+    obs = h5f.root.data.anomaly_srs[:]
+    eofs = h5f.root.data.eofs[:]
+    f1 = h5f.root.data.fcast_bin.f1[:]
+    test_tdim = h5f.root.data._v_attrs.test_tdim
+
+    bobs = Lt.build_obs(obs, test_idx, 12, test_tdim)
+
+    Lt.anim_corrdata(lats, lons, bobs, f1, eofs, test_idx, 'longer_corr.gif')
 finally:
     h5f.close()
