@@ -5,10 +5,10 @@ import Stats as St
 import DataTools as Dt
 import matplotlib.pyplot as plt
 import scipy.io.netcdf as ncf
-import moviepy.editor as mpy
+# import moviepy.editor as mpy
 from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
-from moviepy.video.io.bindings import mplfig_to_npimage
+# from moviepy.video.io.bindings import mplfig_to_npimage
 import matplotlib.cm as cm
 
 __all__ = ['calc_anomaly']
@@ -173,21 +173,21 @@ def load_landsea_mask(maskfile, tile_len):
 ####  PLOTTING FUNCTIONS  ####
 
 
-def anim_corrdata(lats, lons, obs, fcast, eofs, test_idxs, outfile):
-
-    duration = len(obs)
-    print duration
-
-    def make_frame_mpl(t):
-        print t
-        phys = np.dot(fcast[t].T, eofs[t].T)
-        data = St.calc_lac(phys, obs[t]).reshape(94, 192)
-        title = '1-yr forecast 13-yr chunk starting %i' % (1872+test_idxs[t]/12.)
-        fig = plot_corrdata(lats, lons, data, title, outfile=outfile, show_plt=False)
-        return mplfig_to_npimage(fig)
-
-    animation = mpy.VideoClip(make_frame_mpl, duration=69.5)
-    animation.write_gif(outfile, fps=2)
+# def anim_corrdata(lats, lons, obs, fcast, eofs, test_idxs, outfile):
+#
+#     duration = len(obs)
+#     print duration
+#
+#     def make_frame_mpl(t):
+#         print t
+#         phys = np.dot(fcast[t].T, eofs[t].T)
+#         data = St.calc_lac(phys, obs[t]).reshape(94, 192)
+#         title = '1-yr forecast 13-yr chunk starting %i' % (1872+test_idxs[t]/12.)
+#         fig = plot_corrdata(lats, lons, data, title, outfile=outfile, show_plt=False)
+#         return mplfig_to_npimage(fig)
+#
+#     animation = mpy.VideoClip(make_frame_mpl, duration=69.5)
+#     animation.write_gif(outfile, fps=2)
 
 
 def plot_corrdata(lats, lons, data, title, outfile=None, show_plt=True):
