@@ -9,7 +9,7 @@ import tables as tb
 from math import ceil
 
 
-def run_mean(data, window_size, h5_file=None, h5_parent=None, shave_yr=False):
+def run_mean(data, window_size, shave_yr=False):
     """
     A function for calculating the running mean on data.
 
@@ -20,10 +20,6 @@ def run_mean(data, window_size, h5_file=None, h5_parent=None, shave_yr=False):
         space(column) format.
     window_size: int
         Size of the window to compute the running mean over.
-    h5_file:  tables.file.File, optional
-       Output hdf5 file (utilizes pyTables) for the calculated running mean.
-    h5_parent: tables.group.*, optional
-        Parent node to place run_mean dataset under.
 
     Returns
     -------
@@ -55,37 +51,7 @@ def run_mean(data, window_size, h5_file=None, h5_parent=None, shave_yr=False):
     assert(new_shape[0] > 0), ("Not enough data to trim partial years from "
                                "edges.  Please try with shaveYr=False")
 
-    if h5_file is not None:
-        is_h5 = True
-        node_name = 'run_mean'
-
-        if h5_parent is None:
-            h5_parent = h5_file.root
-        
-        try:
-            result = h5_file.create_carray(h5_parent, 
-                                           node_name,
-                                           atom=tb.Atom.from_dtype(data.dtype),
-                                           shape=new_shape,
-                                           title='12-month running mean')
-        except tb.NodeError:
-            if type(h5_parent) == tb.Group:
-                node_path = '/'.join((h5_parent._v_pathname, node_name))
-            elif type(h5_parent) == str:
-                node_path = '/'.join((h5_parent, node_name))
-            else:
-                raise TypeError('Expected group type of tables.Group or str.')
-
-            h5_file.remove_node(node_path)
-            result = h5_file.create_carray(h5_parent, 
-                                           node_name,
-                                           atom=tb.Atom.from_dtype(data.dtype),
-                                           shape=new_shape,
-                                           title='12-month running mean')
-            
-    else:
-        is_h5 = False                                       
-        result = np.zeros(new_shape, dtype=data.dtype)
+    result = np.zeros(new_shape, dtype=data.dtype)
         
     for i in xrange(new_shape[0]):
         #if i % 100 == 0:
@@ -93,9 +59,6 @@ def run_mean(data, window_size, h5_file=None, h5_parent=None, shave_yr=False):
         cntr = cut_from_bot - bedge + i
         result[i] = (data[cntr:(cntr+window_size)].sum(axis=0) /
                      float(window_size))
-                        
-    if is_h5:
-        result = result.read()
     
     return result, cut_from_bot, cut_from_top
    

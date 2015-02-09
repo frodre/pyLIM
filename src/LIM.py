@@ -114,7 +114,10 @@ class LIM(object):
         self._lats = area_wgt_lats
         self._lons = lons
         self._H5file = h5file
-        self._obs_use = self._anomaly_srs = self._climo = None
+        self._obs_use = None
+        self._anomaly_srs = None
+        self._climo = None
+        self._run_mean = None
 
     def forecast(self, t0_data, use_lag1=True, detrend_data=False,
                  use_h5=True):
@@ -156,12 +159,10 @@ class LIM(object):
         """
 
         # Calculate anomaly time series from the data
-        self._anomaly_srs, _bedge, _tedge = run_mean(self._calibration,
+        self._run_mean, _bedge, _tedge = run_mean(self._calibration,
                                                      self._wsize,
-                                                     self._H5file,
-                                                     h5_parent='/data',
                                                      shave_yr=True)
-        self._anomaly_srs, self._climo = Lt.calc_anomaly(self._anomaly_srs,
+        self._anomaly_srs, self._climo = Lt.calc_anomaly(self._run_mean,
                                                          self._wsize)
         
         # Calculate anomalies for initial data
@@ -269,6 +270,10 @@ class LIM(object):
         Dt.var_to_hdf5_carray(h5f, data_grp, 'obs', self._calibration,
                               title='Observation Data')
         if self._anomaly_srs is not None:
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'run_mean',
+                                  self._run_mean,
+                                  title=('Observation Running Mean ',
+                                         'wsize = {}'.format(self._wsize)))
             Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs',
                                   self._anomaly_srs,
                                   title='Observation Anomaly Data')
@@ -312,11 +317,11 @@ class ResampleLIM(LIM):
                                                ).astype(int16))
 
         # Calculate edge concatenation lengths for anomaly procedure
-        obs_run_mean, bedge, tedge = run_mean(calibration,
-                                              wsize,
-                                              shave_yr=True)
+        self._obs_run_mean, bedge, tedge = run_mean(calibration,
+                                                    wsize,
+                                                    shave_yr=True)
         self._full_anomaly_srs, self._full_climo = \
-            Lt.calc_anomaly(obs_run_mean, self._wsize)
+            Lt.calc_anomaly(self._obs_run_mean, self._wsize)
         self._anom_edges = [bedge, tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):
@@ -407,6 +412,10 @@ class ResampleLIM(LIM):
 
         Dt.var_to_hdf5_carray(h5f, data_grp, 'obs', self._original_obs,
                               title='Observation Data')
+        Dt.var_to_hdf5_carray(h5f, data_grp, 'run_mean',
+                              self._obs_run_mean,
+                              title=('Observation Running Mean ' +
+                                     'wsize = {}'.format(self._wsize)))
         Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs',
                               self._full_anomaly_srs,
                               title='Observation Anomaly Data')
