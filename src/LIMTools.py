@@ -5,10 +5,8 @@ import Stats as St
 import DataTools as Dt
 import matplotlib.pyplot as plt
 import scipy.io.netcdf as ncf
-import moviepy.editor as mpy
 from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
-from moviepy.video.io.bindings import mplfig_to_npimage
 import matplotlib.cm as cm
 
 __all__ = ['calc_anomaly']
@@ -76,7 +74,7 @@ def fcast_corr(h5file):
         data = fcasts[i].read()
         for j, trial in enumerate(data):
             phys_fcast = np.dot(trial.T, eofs[j].T)
-            corr_out[i] += St.calc_lac(phys_fcast, compiled_obs[j])
+            corr_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
 
         corr_out[i] /= float(len(data))
 
@@ -135,9 +133,7 @@ def calc_anomaly(data, yrsize, climo=None):
 
 def build_obs(obs, start_idxs, tau, test_dim):
 
-    obs_data = np.zeros((len(start_idxs), test_dim, obs.shape[1]))
-    for i, idx in enumerate(start_idxs):
-        obs_data[i] = obs[(idx+tau):(idx+tau+test_dim)]
+    obs_data = np.array([obs[(idx+tau):(idx+tau+test_dim)] for idx in start_idxs])
         
     return obs_data
 
@@ -173,29 +169,11 @@ def load_landsea_mask(maskfile, tile_len):
 ####  PLOTTING FUNCTIONS  ####
 
 
-def anim_corrdata(lats, lons, obs, fcast, eofs, test_idxs, outfile):
-
-    duration = len(obs)
-    print duration
-
-    def make_frame_mpl(t):
-        print t
-        phys = np.dot(fcast[t].T, eofs[t].T)
-        data = St.calc_lac(phys, obs[t]).reshape(94, 192)
-        title = '1-yr forecast 13-yr chunk starting %i' % (1872+test_idxs[t]/12.)
-        fig = plot_corrdata(lats, lons, data, title, outfile=outfile, show_plt=False)
-        return mplfig_to_npimage(fig)
-
-    animation = mpy.VideoClip(make_frame_mpl, duration=69.5)
-    animation.write_gif(outfile, fps=2)
-
-
-def plot_corrdata(lats, lons, data, title, outfile=None, show_plt=True):
+def plot_corrdata(lats, lons, data, title, outfile=None):
     plt.clf()
     contourlev = np.concatenate(([-1], np.linspace(0, 1, 11)))
     cbticks = np.linspace(0, 1, 11)
     plt.close('all')
-    fig = plt.figure()
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
@@ -208,11 +186,8 @@ def plot_corrdata(lats, lons, data, title, outfile=None, show_plt=True):
     
     if outfile is not None:
         plt.savefig(outfile, format='png')
-
-    if show_plt:
-        plt.show()
     else:
-        return fig
+        plt.show()
 
 
 def plot_cedata(lats, lons, data, title, outfile=None):
