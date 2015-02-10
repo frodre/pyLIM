@@ -127,8 +127,8 @@ def calc_lac(fcast, obs):
         Time series of observations. M x N
     """
     
-    f_mean = fcast.sum(axis=0) / float(fcast.shape[0])
-    o_mean = obs.sum(axis=0) / float(obs.shape[0])
+    f_mean = fcast.mean(axis=0)
+    o_mean = obs.mean(axis=0)
     cov = ne.evaluate('(fcast - f_mean) * (obs - o_mean)')
     cov = cov.sum(axis=0)
     f_std = ne.evaluate('(fcast - f_mean)**2')

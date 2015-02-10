@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import scipy.io.netcdf as ncf
 from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
+from itertools import izip
+
 import matplotlib.cm as cm
 
 __all__ = ['calc_anomaly']
@@ -70,15 +72,15 @@ def fcast_corr(h5file):
 
     for i, lead in enumerate(fcast_times):
         print 'Calculating Correlation: %i yr fcast' % lead
-        compiled_obs = build_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
+        compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
         data = fcasts[i].read()
-        phys_fcast = build_fcast(data, eofs)
+        phys_fcast = build_trial_fcast(data, eofs)
 
         # for j, trial in enumerate(data):
         #     phys_fcast = np.dot(trial.T, eofs[j].T)
         #     corr_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
 
-        corr_out[i] = St.calc_lac(phys_fcast, compiled_obs).mean(axis=0)
+        corr_out[i] = St.calc_lac(phys_fcast, compiled_obs)
 
     return corr_out
 
@@ -113,7 +115,7 @@ def fcast_ce(h5file):
 
     for i, lead in enumerate(fcast_times):
         print 'Calculating CE: %i yr fcast' % lead
-        compiled_obs = build_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
+        compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
         data = fcasts[i].read()
         for j, trial in enumerate(data):
             phys_fcast = np.dot(trial.T, eofs[j].T)
@@ -133,17 +135,32 @@ def calc_anomaly(data, yrsize, climo=None):
     return anomaly.reshape(old_shp), climo
 
 
-def build_obs(obs, start_idxs, tau, test_dim):
+def build_trial_obs(obs, start_idxs, tau, test_dim):
 
-    obs_data = np.array([obs[(idx+tau):(idx+tau+test_dim)] for idx in start_idxs])
+    dat_shp = [len(start_idxs)*test_dim, obs.shape[-1]]
+    obs_data = np.zeros(dat_shp, dtype=obs.dtype)
+
+    for i, idx in enumerate(start_idxs):
+        i0 = i*test_dim
+        ie = i*test_dim + test_dim
+
+        obs_data[i0:ie] = obs[(idx+tau):(idx+tau+test_dim)]
         
     return obs_data
 
 
-def build_fcast(fcast_trials, eofs):
+def build_trial_fcast(fcast_trials, eofs):
 
-    phys_fcast = np.array([np.dot(trial.T, eof.T)
-                           for eof, trial in zip(eofs, fcast_trials)])
+    t_shp = fcast_trials.shape
+    dat_shp = [t_shp[0]*t_shp[-1], eofs.shape[1]]
+    phys_fcast = np.zeros(dat_shp, dtype=fcast_trials.dtype)
+
+    for i, (trial, eof) in enumerate(izip(fcast_trials, eofs)):
+        i0 = i*t_shp[-1]  # i * (test time dimension)
+        ie = i*t_shp[-1] + t_shp[-1]
+
+        phys_fcast[i0:ie] = np.dot(trial.T, eof.T)
+
     return phys_fcast
 
 
@@ -312,7 +329,7 @@ def plot_vstime(obs, loc):
 
 def plot_vstrials(fcast_data, obs, test_tidxs, test_tdim, tau, loc):
     num_trials = fcast_data.shape[0]/test_tdim
-    anom_truth = build_obs(obs, test_tidxs, tau, test_tdim)
+    anom_truth = build_trial_obs(obs, test_tidxs, tau, test_tdim)
     loc_tru_var = anom_truth[:, loc].var()
     print loc_tru_var
     loc_tru_mean = anom_truth[:, loc].mean()
