@@ -138,3 +138,12 @@ def calc_lac(fcast, obs):
     std = f_std * o_std
     
     return cov / std
+
+
+def calc_n_eff(data):
+
+    r1 = calc_lac(data[0:-1], data[1:])
+    n = len(data)
+    n_eff = n*((1-r1)/(1+r1))
+
+    return n_eff

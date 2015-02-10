@@ -260,18 +260,26 @@ def plot_spatial(lats, lons, data, title, outfile=None):
         Title string for the plot
     outfile: str
         Filename to save the png image as
+    only_pos: bool
+        Changes colormap if you are using only positive values.
     """
     plt.clf()
     plt_range = np.max(np.abs(data))
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
-    color = cm.bwr
+
+    if data.min() >= 0:
+        color = cm.OrRd
+    else:
+        color = cm.bwr
+
     m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=-plt_range,
              vmax=plt_range)
     m.colorbar()
     
     plt.title(title)
+
     if outfile is not None:
         plt.savefig(outfile, format='png')
     else:
