@@ -53,7 +53,6 @@ def fcast_corr(h5file):
         fcast_times = h5file.root.data.fcast_times[:]
         fcasts = h5file.list_nodes(h5file.root.data.fcast_bin)
         eofs = h5file.root.data.eofs[:]
-        yrsize = h5file.root.data._v_attrs.yrsize
         test_tdim = h5file.root.data._v_attrs.test_tdim
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
@@ -101,7 +100,6 @@ def fcast_ce(h5file):
         test_tdim = h5file.root.data._v_attrs.test_tdim
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
-        return None
 
     atom = tb.Atom.from_dtype(obs.dtype)
     ce_shp = [len(fcast_times), obs.shape[1]]
@@ -135,18 +133,35 @@ def calc_anomaly(data, yrsize, climo=None):
     return anomaly.reshape(old_shp), climo
 
 
-def build_trial_obs(obs, start_idxs, tau, test_dim):
+def build_trial_obs(obs, start_idxs, tau, test_tdim):
 
-    dat_shp = [len(start_idxs)*test_dim, obs.shape[-1]]
+    dat_shp = [len(start_idxs)*test_tdim, obs.shape[-1]]
     obs_data = np.zeros(dat_shp, dtype=obs.dtype)
 
     for i, idx in enumerate(start_idxs):
-        i0 = i*test_dim
-        ie = i*test_dim + test_dim
+        i0 = i*test_tdim
+        ie = i*test_tdim + test_tdim
 
-        obs_data[i0:ie] = obs[(idx+tau):(idx+tau+test_dim)]
+        obs_data[i0:ie] = obs[(idx+tau):(idx+tau+test_tdim)]
         
     return obs_data
+
+
+def build_trial_obs_from_h5(h5file, tau):
+
+    assert(h5file is not None and type(h5file) == tb.File)
+
+    try:
+        obs = h5file.root.data.anomaly_srs[:]
+        start_idxs = h5file.root.data.test_start_idxs[:]
+        yrsize = h5file.root.data._v_attrs.yrsize
+        test_tdim = h5file.root.data._v_attrs.test_tdim
+    except tb.NodeError as e:
+        raise type(e)(e.message + ' Returning without finishing operation...')
+
+    tau_months = tau*yrsize
+
+    return build_trial_obs(obs, start_idxs, tau_months, test_tdim)
 
 
 def build_trial_fcast(fcast_trials, eofs):
@@ -162,6 +177,20 @@ def build_trial_fcast(fcast_trials, eofs):
         phys_fcast[i0:ie] = np.dot(trial.T, eof.T)
 
     return phys_fcast
+
+
+def build_trial_fcast_from_h5(h5file):
+
+    assert(h5file is not None and type(h5file) == tb.File)
+
+
+    try:
+        fcast_trials = h5file.list_nodes(h5file.root.data.fcast_bin)
+        eofs = h5file.root.data.eofs[:]
+    except tb.NodeError as e:
+        raise type(e)(e.message + ' Returning without finishing operation...')
+
+    return build_trial_fcast(fcast_trials, eofs)
 
 
 def area_wgt(data, lats):
