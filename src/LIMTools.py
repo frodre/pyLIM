@@ -72,11 +72,13 @@ def fcast_corr(h5file):
         print 'Calculating Correlation: %i yr fcast' % lead
         compiled_obs = build_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
         data = fcasts[i].read()
-        for j, trial in enumerate(data):
-            phys_fcast = np.dot(trial.T, eofs[j].T)
-            corr_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
+        phys_fcast = build_fcast(data, eofs)
 
-        corr_out[i] /= float(len(data))
+        # for j, trial in enumerate(data):
+        #     phys_fcast = np.dot(trial.T, eofs[j].T)
+        #     corr_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
+
+        corr_out[i] = St.calc_lac(phys_fcast, compiled_obs).mean(axis=0)
 
     return corr_out
 
@@ -136,6 +138,13 @@ def build_obs(obs, start_idxs, tau, test_dim):
     obs_data = np.array([obs[(idx+tau):(idx+tau+test_dim)] for idx in start_idxs])
         
     return obs_data
+
+
+def build_fcast(fcast_trials, eofs):
+
+    phys_fcast = np.array([np.dot(trial.T, eof.T)
+                           for eof, trial in zip(eofs, fcast_trials)])
+    return phys_fcast
 
 
 def area_wgt(data, lats):
