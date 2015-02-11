@@ -179,14 +179,12 @@ def build_trial_fcast(fcast_trials, eofs):
     return phys_fcast
 
 
-def build_trial_fcast_from_h5(h5file):
+def build_trial_fcast_from_h5(h5file, fcast_idx):
 
     assert(h5file is not None and type(h5file) == tb.File)
-
-
     try:
-        fcast_trials = h5file.list_nodes(h5file.root.data.fcast_bin)
-        eofs = h5file.root.data.eofs[:]
+        fcast_trials = h5file.list_nodes(h5file.root.data.fcast_bin)[fcast_idx].read()
+        eofs = h5file.root.data.eofs.read()
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
 
@@ -300,11 +298,15 @@ def plot_spatial(lats, lons, data, title, outfile=None):
 
     if data.min() >= 0:
         color = cm.OrRd
+        plt_max = plt_range
+        plt_min = 0
     else:
         color = cm.bwr
+        plt_max = plt_range
+        plt_min = -plt_range
 
-    m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=-plt_range,
-             vmax=plt_range)
+    m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=plt_min,
+             vmax=plt_max)
     m.colorbar()
     
     plt.title(title)
