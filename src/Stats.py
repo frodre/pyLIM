@@ -82,7 +82,7 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
     Returns
     -------
 
-    """  # TODO: Finish returns
+    """  # TODO: Finish returns, make m x n  (temporal x spatial) consistent
     
     eofs, svals, pcs = svds(data, k=num_eigs)
     eofs = eofs[:, ::-1]
