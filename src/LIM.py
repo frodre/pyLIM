@@ -193,7 +193,7 @@ class LIM(object):
             data = detrend(data, axis=0, type='linear')
         
         # Calibrate the LIM with (J=neigs) EOFs from training data
-        eofs, _, var_pct = calc_eofs(data.T, self._neigs)         # eofs is NxJ
+        eofs, _ = calc_eofs(data.T, self._neigs)         # eofs is NxJ
         train_data = dot(eofs.T, self._anomaly_srs.T)             # JxM^
         
         # Project our testing data into eof space

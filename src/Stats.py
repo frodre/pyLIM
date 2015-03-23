@@ -7,6 +7,7 @@ import numpy as np
 import numexpr as ne
 import tables as tb
 from math import ceil
+from scipy.sparse import svds
 
 
 def run_mean(data, window_size, shave_yr=False):
@@ -83,11 +84,17 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
 
     """  # TODO: Finish returns
     
-    eofs, e, pcs = np.linalg.svd(data, full_matrices=False)
-    eig_vals = (e ** 2) / (len(e) - 1.)
-    tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
+    eofs, svals, pcs = svds(data, k=num_eigs)
+    eofs = eofs[:, ::-1]
+    svals = svals[::-1]
+    pcs = pcs[::-1]
+    # eig_vals = (svals ** 2) / (len(e) - 1.)
+    # tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
 
-    return eofs[:, 0:num_eigs], eig_vals[0:num_eigs], tot_var
+    if ret_pcs:
+        return eofs, svals, pcs
+    else:
+        return eofs, svals
 
 
 def calc_ce(fcast, trial_obs, obs):
