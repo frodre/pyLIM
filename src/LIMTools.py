@@ -191,6 +191,33 @@ def build_trial_fcast_from_h5(h5file, fcast_idx):
     return build_trial_fcast(fcast_trials, eofs)
 
 
+def calc_corr_signif(fcast, obs):
+
+    assert(fcast.shape == obs.shape)
+
+    corr_neff = St.calc_n_eff(fcast, obs)
+    corr = St.calc_lac(fcast, obs)
+
+    signif = np.empty_like(corr, dtype=np.bool)
+
+    if True in (abs(corr) < 0.5):
+        g_idx = np.where(abs(corr) < 0.5)
+        gen_2std = 2./np.sqrt(corr_neff[g_idx])
+        signif[g_idx] = (abs(corr[g_idx]) - gen_2std) > 0
+
+    if True in (abs(corr) >= 0.5):
+        z_idx = np.where(abs(corr) >= 0.5)
+        z = 1./2 * np.log((1 + corr[z_idx]) / (1 - corr[z_idx]))
+        z_2std = 2. / np.sqrt(corr_neff[z_idx] - 3)
+        signif[z_idx] = (abs(z) - z_2std) > 0
+
+    # if True in ((corr_neff <= 3) & (abs(corr) >= 0.5)):
+    #     assert(False) # I have to figure out how to implement T_Test
+    #     trow = np.where((corr_neff <= 20) & (corr >= 0.5))
+
+    return corr, signif
+
+
 def area_wgt(data, lats):
     assert(data.shape[-1] == lats.shape[-1])
     scale = np.sqrt(np.cos(np.radians(lats)))
@@ -222,7 +249,7 @@ def load_landsea_mask(maskfile, tile_len):
 ####  PLOTTING FUNCTIONS  ####
 
 
-def plot_corrdata(lats, lons, data, title, outfile=None):
+def plot_corrdata(lats, lons, data, title, outfile=None, signif=None):
     plt.clf()
     contourlev = np.concatenate(([-1], np.linspace(0, 1, 11)))
     cbticks = np.linspace(0, 1, 11)
@@ -232,9 +259,18 @@ def plot_corrdata(lats, lons, data, title, outfile=None):
     m.drawcoastlines()
     color = newm
     color.set_under('#9acce5')
+
     m.contourf(lons, lats, data, latlon=True, cmap=color,
                vmin=0, levels=contourlev)
     m.colorbar(ticks=cbticks)
+
+    if signif is not None:
+        ridx, cidx = np.where(np.logical_not(signif))
+        lons = lons[ridx, cidx].flatten()
+        lats = lats[ridx, cidx].flatten()
+        x, y = m(lons, lats)
+        m.scatter(x, y, s=2, c='k', marker='o', alpha=0.5)
+
     plt.title(title)
     
     if outfile is not None:
