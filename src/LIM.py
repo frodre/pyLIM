@@ -167,7 +167,7 @@ class LIM(object):
         
         # Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
-        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize, self._climo)  # M^xN
+        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize)  # M^xN
 
         # Create output locations for our forecasts
         fcast_out_shp = [len(self.fcast_times), self._neigs, t0_data.shape[0]]
