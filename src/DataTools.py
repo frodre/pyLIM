@@ -2,6 +2,44 @@ __author__ = 'wperkins'
 
 import scipy.io.netcdf as ncf #should use netcdf library
 import tables as tb
+import numpy as np
+from Stats import calc_anomaly
+
+
+class DataInput(object):
+    """Data Input Object
+
+    This class is for handling data which may be in a masked format.
+    """
+
+    def __init__(self, data):
+        assert(type(data) == np.ndarray)
+        assert(data.ndims == 3 or data.ndims == 2,
+               'Expected time x (1 or 2)space dimensions')
+
+        self.raw_data = data
+        self.orig_shp = data.shape
+
+        if data.ndims == 3:
+            self.raw_data = self.raw_data.reshape(
+                self.orig_shp[0],  self.orig_shp[1]*self.orig_shp[2])
+
+        if not np.alltrue(np.isfinite(data)):
+            self.is_masked = True
+            self.have_data = np.isfinite(self.raw_data[0])
+
+            #Find locations we have data for at all times
+            for time in self.raw_data:
+                self.have_data &= np.isfinite(time)
+
+            self.data = self.raw_data[:, self.have_data]
+        else:
+            self.is_masked = False
+            self.data = self.raw_data
+
+        self.is_anomaly = False
+        self.is_runmean = False
+        self.is_detrended = False
 
 
 def unpack_netcdf_data(ncvar):

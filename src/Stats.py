@@ -159,3 +159,12 @@ def calc_n_eff(data1, data2=None):
         n_eff = n*((1-r1)/(1+r1))
 
     return n_eff
+
+
+def calc_anomaly(data, yrsize, climo=None):
+    old_shp = data.shape
+    new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1:])
+    if climo is None:
+        climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
+    anomaly = data.reshape(new_shp) - climo
+    return anomaly.reshape(old_shp), climo
