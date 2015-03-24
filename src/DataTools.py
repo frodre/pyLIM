@@ -14,13 +14,13 @@ class DataInput(object):
 
     def __init__(self, data):
         assert(type(data) == np.ndarray)
-        assert(data.ndims == 3 or data.ndims == 2,
+        assert((data.ndim == 3) or (data.ndim == 2),
                'Expected time x (1 or 2)space dimensions')
 
         self.raw_data = data
         self.orig_shp = data.shape
 
-        if data.ndims == 3:
+        if data.ndim == 3:
             self.raw_data = self.raw_data.reshape(
                 self.orig_shp[0],  self.orig_shp[1]*self.orig_shp[2])
 
