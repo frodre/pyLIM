@@ -301,17 +301,17 @@ class LIM(object):
                 Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lats',
                                       self._mask_lats,
                                       title='Flattened Masked Latitudes')
-            else:
-                Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
-                                      title='Flattened Latitude Grid')
+
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
+                                  title='Flattened Latitude Grid')
         if self._lons is not None:
             if self.masked_input:
                 Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lons',
                                       self._mask_lons,
                                       title='Flattened Masked Longitudes')
-            else:
-                Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
-                                      title='Flattened Longitude Grid')
+
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
+                                  title='Flattened Longitude Grid')
 
         if self.masked_input:
             Dt.var_to_hdf5_carray(h5f, data_grp, 'spatial_valid',
@@ -459,17 +459,15 @@ class ResampleLIM(LIM):
                 Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lats',
                                       self._mask_lats,
                                       title='Flattened Masked Latitudes')
-            else:
-                Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
-                                      title='Flattened Latitude Grid')
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
+                                  title='Flattened Latitude Grid')
         if self._lons is not None:
             if self.masked_input:
                 Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lons',
                                       self._mask_lons,
                                       title='Flattened Masked Longitudes')
-            else:
-                Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
-                                      title='Flattened Longitude Grid')
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
+                                  title='Flattened Longitude Grid')
 
         if self.masked_input:
             Dt.var_to_hdf5_carray(h5f, data_grp, 'spatial_valid',
