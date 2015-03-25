@@ -13,19 +13,19 @@ class DataObject(object):
     """
 
     def __init__(self, data, valid_data=None):
-        assert(type(data) == np.ndarray)
-        assert((data.ndim == 3) or (data.ndim == 2),
-               'Expected time x (1 or 2)space dimensions')
+        assert type(data) == np.ndarray
+        assert (data.ndim == 3) or (data.ndim == 2),\
+            'Expected time x (1 or 2)space dimensions'
 
         # Check to see if compressed array was given
         compressed = False
         if valid_data is not None:
-            assert(data.ndim - 1 == valid_data.ndim,
-                   'Mask spatial dimension mismatch.')
+            assert data.ndim - 1 == valid_data.ndim,\
+                'Mask spatial dimension mismatch.'
             for dat_dim, mask_dim in zip(data.shape[1:], valid_data.shape):
-                assert(dat_dim <= mask_dim,
-                       'Valid data array provided should have larger ' +
-                       'spatial dimension than the masked input data.')
+                assert dat_dim <= mask_dim,\
+                    'Valid data array provided should have larger ' +\
+                    'spatial dimension than the masked input data.'
                 if dat_dim < mask_dim:
                     compressed |= True
 
