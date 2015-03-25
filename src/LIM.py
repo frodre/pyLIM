@@ -35,21 +35,21 @@ def _calc_m(x0, xt):
 def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
     try:
         out_fcast = [h5f.create_carray(dest,
-                                       'f%i' % lead,
+                                       'f{:d}'.format(lead),
                                        atom=atom,
                                        shape=shape,
                                        createparents=True,
-                                       title='%i Year Forecast' % lead)
+                                       title='{:d} Year Forecast'.format(lead))
                      for lead in fcast_times]
     except tb.NodeError:
         for lead in fcast_times:
-            h5f.remove_node('/'.join((dest, 'f%i' % lead)))
+            h5f.remove_node('/'.join((dest, 'f{:d}'.format(lead))))
         out_fcast = [h5f.create_carray(dest,
-                                       'f%i' % lead,
+                                       'f{:d}'.format(lead),
                                        atom=atom,
                                        shape=shape,
                                        createparents=True,
-                                       title='%i Year Forecast' % lead)
+                                       title='{:d} Year Forecast'.format(lead))
                      for lead in fcast_times]
     return out_fcast
 
