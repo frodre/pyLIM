@@ -6,36 +6,60 @@ import numpy as np
 from Stats import calc_anomaly
 
 
-class DataInput(object):
+class DataObject(object):
     """Data Input Object
 
     This class is for handling data which may be in a masked format.
     """
 
-    def __init__(self, data):
+    def __init__(self, data, valid_data=None):
         assert(type(data) == np.ndarray)
         assert((data.ndim == 3) or (data.ndim == 2),
                'Expected time x (1 or 2)space dimensions')
 
-        self.raw_data = data
-        self.orig_shp = data.shape
+        # Check to see if compressed array was given
+        compressed = False
+        if valid_data is not None:
+            assert(data.ndim - 1 == valid_data.ndim,
+                   'Mask spatial dimension mismatch.')
+            for dat_dim, mask_dim in zip(data.shape[1:], valid_data.shape):
+                assert(dat_dim <= mask_dim,
+                       'Valid data array provided should have larger ' +
+                       'spatial dimension than the masked input data.')
+                if dat_dim < mask_dim:
+                    compressed |= True
 
-        if data.ndim == 3:
-            self.raw_data = self.raw_data.reshape(
-                self.orig_shp[0],  self.orig_shp[1]*self.orig_shp[2])
-
-        if not np.alltrue(np.isfinite(data)):
-            self.is_masked = True
-            self.have_data = np.isfinite(self.raw_data[0])
-
-            #Find locations we have data for at all times
-            for time in self.raw_data:
-                self.have_data &= np.isfinite(time)
-
-            self.data = self.raw_data[:, self.have_data]
+            if not compressed:
+                data[:, np.logical_not(valid_data)] = np.nan
         else:
-            self.is_masked = False
-            self.data = self.raw_data
+            compressed = False
+
+        if compressed:
+            self.data = data
+            self.full_data = np.empty([data.shape[0]] + valid_data.shape)*np.nan
+            self.full_shp = self.full_data.shape
+            self.have_data = valid_data
+            self.is_masked = True
+        else:
+            self.full_data = data
+            self.full_shp = data.shape
+
+            if data.ndim == 3:
+                new_shp = (self.full_shp[0], self.full_shp[1]*self.full_shp[2])
+                self.full_data = self.full_data.reshape(new_shp)
+
+            if not np.alltrue(np.isfinite(data)):
+                self.is_masked = True
+                self.have_data = np.isfinite(self.full_data[0])
+
+                #Find locations we have data for at all times
+                for time in self.full_data:
+                    self.have_data &= np.isfinite(time)
+
+                self.data = self.full_data[:, self.have_data]
+            else:
+                self.is_masked = False
+                self.data = self.full_data
 
         self.is_anomaly = False
         self.is_runmean = False
