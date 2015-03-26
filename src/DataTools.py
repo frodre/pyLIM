@@ -14,15 +14,17 @@ class DataObject(object):
 
     def __init__(self, data, valid_data=None):
         assert type(data) == np.ndarray
-        assert (data.ndim == 3) or (data.ndim == 2),\
-            'Expected time x (1 or 2)space dimensions'
+        assert (data.ndim <= 3) and (data.ndim >= 1),\
+            'Expected ndim from 1 to 3'
 
         # Check to see if compressed array was given
         compressed = False
         if valid_data is not None:
-            assert data.ndim - 1 == valid_data.ndim,\
-                'Mask spatial dimension mismatch.'
-            for dat_dim, mask_dim in zip(data.shape[1:], valid_data.shape):
+            dim_lim = valid_data.ndim
+            assert dim_lim < 3,\
+                'valid_input should not have more than 2 dimensions.'
+            for dat_dim, mask_dim in zip(data.shape[::-1][:dim_lim],
+                                         valid_data.shape[::-1][:dim_lim]):
                 assert dat_dim <= mask_dim,\
                     'Valid data array provided should have larger ' +\
                     'spatial dimension than the masked input data.'
@@ -30,15 +32,17 @@ class DataObject(object):
                     compressed |= True
 
             if not compressed:
-                data[:, np.logical_not(valid_data)] = np.nan
+                full_valid = np.ones(data.shape, dtype=np.bool) * valid_data
+                data[~full_valid] = np.nan
         else:
             compressed = False
 
         if compressed:
             self.data = data
-            full_shp = [data.shape[0]] + list(valid_data.shape)
+            full_shp = list(data.shape[:(data.ndim-dim_lim)]) + list(valid_data.shape)
+            full_valid = np.ones(full_shp, dtype=np.bool) * valid_data
             self.full_data = np.empty(full_shp)*np.nan
-            self.full_data[:, valid_data] = self.data
+            self.full_data[full_valid] = self.data
             self.full_shp = self.full_data.shape
             self.have_data = valid_data
             self.is_masked = True
