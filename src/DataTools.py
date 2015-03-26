@@ -36,7 +36,9 @@ class DataObject(object):
 
         if compressed:
             self.data = data
-            self.full_data = np.empty([data.shape[0]] + valid_data.shape)*np.nan
+            full_shp = [data.shape[0]] + list(valid_data.shape)
+            self.full_data = np.empty(full_shp)*np.nan
+            self.full_data[:, valid_data] = self.data
             self.full_shp = self.full_data.shape
             self.have_data = valid_data
             self.is_masked = True
