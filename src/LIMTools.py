@@ -124,11 +124,14 @@ def fcast_ce(h5file):
     return ce_out
 
 
-def calc_anomaly(data, yrsize, climo=None):
+def calc_anomaly(data, yrsize, climo=None, nan=False):
     old_shp = data.shape
     new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
     if climo is None:
-        climo = data.reshape(new_shp).mean(axis=0)
+        if nan:
+            climo = np.nanmean(data.reshape(new_shp), axis=0)
+        else:
+            climo = data.reshape(new_shp).mean(axis=0)
     anomaly = data.reshape(new_shp) - climo
     return anomaly.reshape(old_shp), climo
 
@@ -218,6 +221,7 @@ def calc_corr_signif(fcast, obs):
     return corr, signif
 
 
+# TODO: Account for nan in detrending
 def area_wgt(data, lats):
     assert(data.shape[-1] == lats.shape[-1])
     scale = np.sqrt(np.cos(np.radians(lats)))

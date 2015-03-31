@@ -7,10 +7,11 @@ import numpy as np
 import numexpr as ne
 import tables as tb
 from math import ceil
-from scipy.sparse import svds
+from scipy.sparse.linalg import svds
+from scipy.sparse import lil_matrix
 
 
-def run_mean(data, window_size, shave_yr=False):
+def run_mean(data, window_size, shave_yr=False, nan=False):
     """
     A function for calculating the running mean on data.
 
@@ -55,16 +56,16 @@ def run_mean(data, window_size, shave_yr=False):
     result = np.zeros(new_shape, dtype=data.dtype)
         
     for i in xrange(new_shape[0]):
-        #if i % 100 == 0:
-        #    print 'Calc for index %i' % i
         cntr = cut_from_bot - bedge + i
-        result[i] = (data[cntr:(cntr+window_size)].sum(axis=0) /
-                     float(window_size))
+        if nan:
+            result[i] = np.nanmean(data[cntr:(cntr+window_size)], axis=0)
+        else:
+            result[i] = data[cntr:(cntr+window_size)].mean(axis=0)
     
     return result, cut_from_bot, cut_from_top
    
 
-def calc_eofs(data, num_eigs, ret_pcs=False):
+def calc_eofs(data, num_eigs, ret_pcs=False, nan=False):
     """
     Method to calculate the EOFs of given  dataset.  This assumes data comes in as
     an m x n matrix where m is the spatial dimension and n is the sampling
@@ -83,6 +84,11 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
     -------
 
     """  # TODO: Finish returns, make m x n  (temporal x spatial) consistent
+
+    if nan:
+        # ssert np.alltrue(data != 0)
+        data[np.isnan(data)] = 0
+        data = lil_matrix(data).tocsr()
     
     eofs, svals, pcs = svds(data, k=num_eigs)
     eofs = eofs[:, ::-1]
@@ -118,35 +124,6 @@ def calc_ce(fcast, trial_obs, obs):
     return 1 - evar/cvar
 
 
-def calc_lac(fcast, obs):
-    """
-    Method to calculate the Local Anomaly Correlation (LAC).
-    
-    Note: If necessary (memory concerns) in the future, the numexpr statements
-    can be extended to use pytable arrays.  Would need to provide means to 
-    function, as summing over the dataset is still very slow it seems. 
-    
-    Parameters
-    ----------
-    fcast: ndarray
-        Time series of forecast data. M x N where M is the temporal dimension.
-    obs: ndarray
-        Time series of observations. M x N
-    """
-    
-    f_mean = fcast.mean(axis=0)
-    o_mean = obs.mean(axis=0)
-    cov = ne.evaluate('(fcast - f_mean) * (obs - o_mean)')
-    cov = cov.sum(axis=0)
-    f_std = ne.evaluate('(fcast - f_mean)**2')
-    f_std = np.sqrt(f_std.sum(axis=0))
-    o_std = ne.evaluate('(obs - o_mean)**2')
-    o_std = np.sqrt(o_std.sum(axis=0))
-    std = f_std * o_std
-    
-    return cov / std
-
-
 def calc_n_eff(data1, data2=None):
 
     r1 = calc_lac(data1[0:-1], data1[1:])
@@ -159,3 +136,41 @@ def calc_n_eff(data1, data2=None):
         n_eff = n*((1-r1)/(1+r1))
 
     return n_eff
+
+
+def calc_lac(fcast, obs, nan=False):
+    """
+    Method to calculate the Local Anomaly Correlation (LAC).
+
+    Note: If necessary (memory concerns) in the future, the numexpr statements
+    can be extended to use pytable arrays.  Would need to provide means to
+    function, as summing over the dataset is still very slow it seems.
+
+    Parameters
+    ----------
+    fcast: ndarray
+        Time series of forecast data. M x N where M is the temporal dimension.
+    obs: ndarray
+        Time series of observations. M x N
+    """
+
+    if nan:
+        f_mean = np.nanmean(fcast, axis=0)
+        o_mean = np.nanmean(obs, axis=0)
+    else:
+        f_mean = fcast.mean(axis=0)
+        o_mean = obs.mean(axis=0)
+    cov = ne.evaluate('(fcast - f_mean) * (obs - o_mean)')
+    f_std = ne.evaluate('(fcast - f_mean)**2')
+    o_std = ne.evaluate('(obs - o_mean)**2')
+    if nan:
+        cov = np.nansum(cov, axis=0)
+        f_std = np.nansqrt(np.nansum(f_std, axis=0))
+        o_std = np.nansqrt(np.nansum(o_std, axis=0))
+        cov = np.nansum(cov, axis=0)
+    else:
+        f_std = np.sqrt(f_std.sum(axis=0))
+        o_std = np.sqrt(o_std.sum(axis=0))
+    std = f_std * o_std
+
+    return cov / std

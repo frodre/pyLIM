@@ -1,6 +1,6 @@
 #-*- coding: utf-8 -*-
 from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16, copy
-from numpy import linspace, unique, concatenate, copy
+from numpy import linspace, unique, concatenate, copy, isnan
 from numpy.linalg import pinv
 from scipy.signal import detrend
 from math import ceil
@@ -27,8 +27,9 @@ def _calc_m(x0, xt):
     
     x0x0 = dot(x0, x0.T)
     x0xt = dot(xt, x0.T)
-    
-    # Calculate tau-lag G value
+
+    x0x0[isnan(x0x0)] = 0
+
     return dot(x0xt, pinv(x0x0))
 
 
@@ -79,7 +80,7 @@ class LIM(object):
     """
     
     def __init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
-                 area_wgt_lats=None, lons=None, h5file=None):
+                 area_wgt_lats=None, lons=None, masked=False, h5file=None):
         """
         Parameters
         ----------
@@ -118,6 +119,7 @@ class LIM(object):
         self._anomaly_srs = None
         self._climo = None
         self._run_mean = None
+        self._masked = masked
 
     def forecast(self, t0_data, use_lag1=True, detrend_data=False,
                  use_h5=True):
@@ -160,14 +162,18 @@ class LIM(object):
 
         # Calculate anomaly time series from the data
         self._run_mean, _bedge, _tedge = run_mean(self._calibration,
-                                                     self._wsize,
-                                                     shave_yr=True)
+                                                  self._wsize,
+                                                  shave_yr=True,
+                                                  nan=self._masked)
         self._anomaly_srs, self._climo = Lt.calc_anomaly(self._run_mean,
-                                                         self._wsize)
+                                                         self._wsize,
+                                                         nan=self._masked)
         
         # Calculate anomalies for initial data
-        t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
-        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize)  # M^xN
+        t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True,
+                                 nan=self._masked)
+        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize,
+                                     nan=self._masked)  # M^xN
 
         # Create output locations for our forecasts
         fcast_out_shp = [len(self.fcast_times), self._neigs, t0_data.shape[0]]
@@ -193,7 +199,7 @@ class LIM(object):
             data = detrend(data, axis=0, type='linear')
         
         # Calibrate the LIM with (J=neigs) EOFs from training data
-        eofs, _ = calc_eofs(data.T, self._neigs)         # eofs is NxJ
+        eofs, _ = calc_eofs(data.T, self._neigs, nan=self._masked)# eofs is NxJ
         train_data = dot(eofs.T, self._anomaly_srs.T)             # JxM^
         
         # Project our testing data into eof space
@@ -292,10 +298,11 @@ class ResampleLIM(LIM):
 
     def __init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
                  hold_chk_pct, num_trials, area_wgt_lats=None, lons=None,
+                 masked=False,
                  h5file=None):
 
         LIM.__init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
-                     area_wgt_lats, lons, h5file)
+                     area_wgt_lats, lons, masked, h5file)
 
         # Need original input dataset for resampling
         self._original_obs = copy(self._calibration)  # potential erase reference
