@@ -4,47 +4,59 @@ import tables as tb
 import scipy.io.netcdf as ncf
 import os
 
-# if os.name == 'nt':
-#     fname = "G:/Hakim Research/data/Trend_LIM_data.h5"
-# else:
-#     fname = '/home/chaos2/wperkins/data/pyLIM/Trend_LIM_data.h5'
-#
+import LIMTools as Lt
+
+# Load H5 Dataset
+if os.name == 'nt':
+    fname = "G:/Hakim Research/data/Trend_LIM_data.h5"
+else:
+    # fname = '/home/chaos2/wperkins/data/pyLIM/Trend_LIM_data.h5'
+    fname = '/home/chaos2/wperkins/data/HadCRUT/HadCRUT.4.3.0.0.ens_avg_anom.h5'
+    outf = '/home/chaos2/wperkins/data/pyLIM/nanstats_test.h5'
+
 # f = tb.open_file(fname, 'r')
-# obs = f.root.data.obs.read()
+# obs = f.root.data.ens_avgT.read()
 # lats = f.root.data.lats.read()
 # lons = f.root.data.lons.read()
 # lats, lons = np.meshgrid(lats, lons, indexing='ij')
 
-if os.name == 'nt':
-    f = ncf.netcdf_file('G:/Hakim Research/data/20CR/air.2m.mon.mean.nc', 'r')
-else:
-    f = ncf.netcdf_file('/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc', 'r')
-
-tvar = f.variables['air']
-lats = f.variables['lat'].data
-lons = f.variables['lon'].data
-lats, lons = np.meshgrid(lats, lons, indexing='ij')
-
-#account for data storage as int * scale + offset
-try:
-    sf = tvar.scale_factor
-    offset = tvar.add_offset
-    obs = tvar.data*sf + offset
-except AttributeError:
-    obs = tvar.data
-    
-#flatten t-data
-spatial_shp = obs.shape[1:]
-obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
+# # Load netCDF dataset
+# if os.name == 'nt':
+#     f = ncf.netcdf_file('G:/Hakim Research/data/20CR/air.2m.mon.mean.nc', 'r')
+# else:
+#     f = ncf.netcdf_file('/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc', 'r')
+#
+# tvar = f.variables['air']
+# lats = f.variables['lat'].data
+# lons = f.variables['lon'].data
+# lats, lons = np.meshgrid(lats, lons, indexing='ij')
+#
+# #account for data storage as int * scale + offset
+# try:
+#     sf = tvar.scale_factor
+#     offset = tvar.add_offset
+#     obs = tvar.data*sf + offset
+# except AttributeError:
+#     obs = tvar.data
+#
+# #flatten t-data
+# spatial_shp = obs.shape[1:]
+# obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
+#
+# # Create test/training set from obs (mimick what's in resample)
+# test_dat = obs[0:yr*16]
+# train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
+# #sample_tdim = len(train_data) - 9*yr
+# #train_data = train_data[0:sample_tdim]  #Calibration dataset
 
 yr = 12
-test_dat = obs[0:yr*16]
-train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
-#sample_tdim = len(train_data) - 9*yr
-#train_data = train_data[0:sample_tdim]  #Calibration dataset
-
-#lats = f.root.data.lats.read()
-#lons = f.root.data.lons.read()
+f = tb.open_file(fname, 'r')
+obs = f.root.ens_avgT.read()
+spatial_shp = obs.shape[1:]
+obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
+lats = f.root.lats.read()
+lons = f.root.lons.read()
+lats, lons = np.meshgrid(lats, lons, indexing='ij')
 lats = lats.flatten()
 lons = lons.flatten()
 
@@ -94,18 +106,48 @@ lons = lons.flatten()
 #     h5f2.close()
 #     h5f3.close()
 
+# Running resampling experiments
 try:
-    ftimes = range(1, 10)  # 1 - 9 yr forecasts
+    ftimes = range(0, 3)  # 1 - 9 yr forecasts
     neigs = 20  # num PCs for EOFs
     hold_frac = 0.1  # fraction of data to withold for resample tests
-    numTrials = 140
-    h5f = tb.open_file('trials_1yr.h5', 'w')
+    numTrials = 30
+    h5f = tb.open_file(outf, 'w')
 
-    resample = LIM.ResampleLIM(obs, yr, [1], neigs, hold_frac, numTrials,
+    resample = LIM.ResampleLIM(obs[-600:], yr, ftimes, neigs, hold_frac, numTrials,
                                area_wgt_lats=lats,
                                lons=lons,
+                               masked=True,
                                h5file=h5f)
     resample.forecast()
     resample.save()
 finally:
     h5f.close()
+    f.close()
+
+# Testing correlation code
+# try:
+#     fname = '/home/chaos2/wperkins/data/pyLIM/10_trial_test.h5'
+#     # fname = '/home/chaos2/wperkins/data/pyLIM/20_trial_test.h5'
+#     h5f = tb.open_file(fname, 'a')
+#     Lt.fcast_corr(h5f)
+# finally:
+#     h5f.close()
+
+# try:
+#     f1 = tb.open_file('/home/chaos2/wperkins/data/pyLIM/newman_comp_1_9fcast.h5', 'r')
+#     corr1 = f1.root.stats.corr.read()[1].reshape(94, 192)
+#     lats = f1.root.data.lats.read().reshape(corr1.shape)
+#     lons = f1.root.data.lons.read().reshape(corr1.shape)
+#     #Lt.plot_corrdata(lats, lons, corr1, title='130 Trial 1-yr LAC')
+#
+#     b_obs = Lt.build_trial_obs_from_h5(f1, 1)
+#     b_fcast = Lt.build_trial_fcast_from_h5(f1, 1)
+#
+#     corr, signif = Lt.calc_corr_signif(b_fcast, b_obs)
+#     corr = corr.reshape(corr1.shape)
+#     signif = signif.reshape(corr1.shape)
+#
+#     Lt.plot_corrdata(lats, lons, corr, title='Test', signif=signif)
+# finally:
+#     f1.close()

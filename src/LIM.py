@@ -1,6 +1,6 @@
 #-*- coding: utf-8 -*-
 from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16, copy
-from numpy import linspace, unique, concatenate, copy, isnan
+from numpy import linspace, unique, concatenate, copy, nan, isnan
 from numpy.linalg import pinv
 from scipy.signal import detrend
 from math import ceil
@@ -29,6 +29,8 @@ def _calc_m(x0, xt):
     x0xt = dot(xt, x0.T)
 
     x0x0[isnan(x0x0)] = 0
+    c0_inv = pinv(x0x0)
+    c0_inv[c0_inv == 0] = nan
 
     return dot(x0xt, pinv(x0x0))
 
@@ -328,7 +330,7 @@ class ResampleLIM(LIM):
                                                     wsize,
                                                     shave_yr=True)
         self._full_anomaly_srs, self._full_climo = \
-            Lt.calc_anomaly(self._obs_run_mean, self._wsize)
+            Lt.calc_anomaly(self._obs_run_mean, self._wsize, nan=self._masked)
         self._anom_edges = [bedge, tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):

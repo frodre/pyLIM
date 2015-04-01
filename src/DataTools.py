@@ -27,7 +27,7 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
         out_arr[:] = data
     except tb.NodeError:
         if type(group) == tb.Group:
-            node_path = '/'.join((group._v_pathname, node))
+            node_pfath = '/'.join((group._v_pathname, node))
         elif type(group) == str:
             node_path = '/'.join((group, node))
         else:

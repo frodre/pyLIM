@@ -7,6 +7,8 @@ Currently performing a LIM study on surface temps to try and recreate
 the findings from Newman 2014.  Script assumes that it is already in
 monthly mean format.
 
+NOTE THAT THIS SCRIPT IS NOT IN USE ANYMORE, PROBABLY DOESN'T WORK
+
 Author: Andre Perkins
 """
 
