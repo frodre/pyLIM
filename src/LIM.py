@@ -6,7 +6,7 @@ from scipy.signal import detrend
 from math import ceil
 import tables as tb
 
-from Stats import calc_eofs, run_mean
+from Stats import calc_eofs, run_mean, calc_anomaly
 import LIMTools as Lt
 import DataTools as Dt
 
@@ -35,21 +35,21 @@ def _calc_m(x0, xt):
 def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
     try:
         out_fcast = [h5f.create_carray(dest,
-                                       'f%i' % lead,
+                                       'f{:d}'.format(lead),
                                        atom=atom,
                                        shape=shape,
                                        createparents=True,
-                                       title='%i Year Forecast' % lead)
+                                       title='{:d} Year Forecast'.format(lead))
                      for lead in fcast_times]
     except tb.NodeError:
         for lead in fcast_times:
-            h5f.remove_node('/'.join((dest, 'f%i' % lead)))
+            h5f.remove_node('/'.join((dest, 'f{:d}'.format(lead))))
         out_fcast = [h5f.create_carray(dest,
-                                       'f%i' % lead,
+                                       'f{:d}'.format(lead),
                                        atom=atom,
                                        shape=shape,
                                        createparents=True,
-                                       title='%i Year Forecast' % lead)
+                                       title='{:d} Year Forecast'.format(lead))
                      for lead in fcast_times]
     return out_fcast
 
@@ -78,15 +78,17 @@ class LIM(object):
     ....
     """
     
-    def __init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
+    def __init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
                  area_wgt_lats=None, lons=None, h5file=None):
         """
         Parameters
         ----------
-        calibration: ndarray
-            Dataset for determining LIM forecast EOFs.  Provided data should be
-            in a 2D MxN matrix where M (rows) represent temporal samples and
-            N(columns) represent spatial samples.
+        data_in: DataTools.DataInput
+            Dataset for determining LIM forecast EOFs.  DataInput provids
+            a 2D MxN matrix where M (rows) represent temporal samples and
+            N(columns) represent spatial samples.  It handles data with
+            nan masking.  Note: If data is masked, saved output spatial
+            dimensions will be reduced to valid data.
         wsize: int
             Windowsize for running mean.  For this implementation it should
             be equal to a year's worth of samples
@@ -107,7 +109,7 @@ class LIM(object):
             directories under the given group
         """
         
-        self._calibration = calibration
+        self._calibration = data_in.data
         self._wsize = wsize
         self.fcast_times = array(fcast_times, dtype=int16)
         self._neigs = fcast_num_pcs
@@ -118,6 +120,16 @@ class LIM(object):
         self._anomaly_srs = None
         self._climo = None
         self._run_mean = None
+        self.masked_input = data_in.is_masked
+
+        if self.masked_input:
+            self.spatial_valid = data_in.have_data
+            if self._lats is not None:
+                self._mask_lats = self._lats[data_in.have_data]
+            if self._lons is not None:
+                self._mask_lons = self._lons[data_in.have_data]
+        else:
+            self.spatial_valid = None
 
     def forecast(self, t0_data, use_lag1=True, detrend_data=False,
                  use_h5=True):
@@ -167,7 +179,7 @@ class LIM(object):
         
         # Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
-        t0_data, _ = Lt.calc_anomaly(t0_data, self._wsize)  # M^xN
+        t0_data, _ = calc_anomaly(t0_data, self._wsize, self._climo)  # M^xN
 
         # Create output locations for our forecasts
         fcast_out_shp = [len(self.fcast_times), self._neigs, t0_data.shape[0]]
@@ -184,7 +196,10 @@ class LIM(object):
         
         # Area Weighting if _lats is set
         if self._lats is not None:
-            data = _area_wgt(self._anomaly_srs, self._lats)
+            if self.spatial_valid is not None:
+                data = _area_wgt(self._anomaly_srs, self._mask_lats)
+            else:
+                data = _area_wgt(self._anomaly_srs, self._lats)
         else:
             data = self._anomaly_srs
 
@@ -281,20 +296,36 @@ class LIM(object):
                                   title='Monthly climatology from Obs')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'fcast_times', self.fcast_times,
                               title='Forecast Lead Times')
-        Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
-                              title='Latitude Grid')
+        if self._lats is not None:
+            if self.masked_input:
+                Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lats',
+                                      self._mask_lats,
+                                      title='Flattened Masked Latitudes')
+
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
+                                  title='Flattened Latitude Grid')
         if self._lons is not None:
+            if self.masked_input:
+                Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lons',
+                                      self._mask_lons,
+                                      title='Flattened Masked Longitudes')
+
             Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
-                                  title='Longitude Grid')
+                                  title='Flattened Longitude Grid')
+
+        if self.masked_input:
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'spatial_valid',
+                                  self.spatial_valid,
+                                  title='Valid Spatial Locations')
 
 
 class ResampleLIM(LIM):
 
-    def __init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
+    def __init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
                  hold_chk_pct, num_trials, area_wgt_lats=None, lons=None,
                  h5file=None):
 
-        LIM.__init__(self, calibration, wsize, fcast_times, fcast_num_pcs,
+        LIM.__init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
                      area_wgt_lats, lons, h5file)
 
         # Need original input dataset for resampling
@@ -317,11 +348,11 @@ class ResampleLIM(LIM):
                                                ).astype(int16))
 
         # Calculate edge concatenation lengths for anomaly procedure
-        self._obs_run_mean, bedge, tedge = run_mean(calibration,
+        self._obs_run_mean, bedge, tedge = run_mean(self._calibration,
                                                     wsize,
                                                     shave_yr=True)
         self._full_anomaly_srs, self._full_climo = \
-            Lt.calc_anomaly(self._obs_run_mean, self._wsize)
+            calc_anomaly(self._obs_run_mean, self._wsize)
         self._anom_edges = [bedge, tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):
@@ -423,11 +454,26 @@ class ResampleLIM(LIM):
                               title='Monthly climatology from Obs')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'fcast_times', self.fcast_times,
                               title='Forecast Lead Times')
-        Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
-                              title='Latitude Grid')
+        if self._lats is not None:
+            if self.masked_input:
+                Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lats',
+                                      self._mask_lats,
+                                      title='Flattened Masked Latitudes')
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'lats', self._lats,
+                                  title='Flattened Latitude Grid')
         if self._lons is not None:
+            if self.masked_input:
+                Dt.var_to_hdf5_carray(h5f, data_grp, 'masked_lons',
+                                      self._mask_lons,
+                                      title='Flattened Masked Longitudes')
             Dt.var_to_hdf5_carray(h5f, data_grp, 'lons', self._lons,
-                                  title='Longitude Grid')
+                                  title='Flattened Longitude Grid')
+
+        if self.masked_input:
+            Dt.var_to_hdf5_carray(h5f, data_grp, 'spatial_valid',
+                                  self.spatial_valid,
+                                  title='Valid Spatial Locations')
+
         Dt.var_to_hdf5_carray(h5f, data_grp, 'test_start_idxs',
                               self._test_start_idx,
                               title='Forecast Trial Starting Indices')

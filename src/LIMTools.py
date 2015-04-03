@@ -41,47 +41,105 @@ cdict = {'red':     ((0.0, lb[0], lb[0]),
 newm = LinearSegmentedColormap('newman', cdict)
 
 
-def fcast_corr(h5file):
-    node_name = 'corr'
-    parent = '/stats'
+def area_wgt(data, lats):
+    assert(data.shape[-1] == lats.shape[-1])
+    scale = np.sqrt(np.cos(np.radians(lats)))
+    return data * scale
+
+
+def build_trial_fcast(fcast_trials, eofs):
+
+    t_shp = fcast_trials.shape
+    dat_shp = [t_shp[0]*t_shp[-1], eofs.shape[1]]
+    phys_fcast = np.zeros(dat_shp, dtype=fcast_trials.dtype)
+
+    for i, (trial, eof) in enumerate(izip(fcast_trials, eofs)):
+        i0 = i*t_shp[-1]  # i * (test time dimension)
+        ie = i*t_shp[-1] + t_shp[-1]
+
+        phys_fcast[i0:ie] = np.dot(trial.T, eof.T)
+
+    return phys_fcast
+
+
+def build_trial_fcast_from_h5(h5file, fcast_idx):
+
+    assert(h5file is not None and type(h5file) == tb.File)
+    try:
+        fcast_trials = h5file.list_nodes(h5file.root.data.fcast_bin)[fcast_idx].read()
+        eofs = h5file.root.data.eofs.read()
+    except tb.NodeError as e:
+        raise type(e)(e.message + ' Returning without finishing operation...')
+
+    return build_trial_fcast(fcast_trials, eofs)
+
+
+def build_trial_obs(obs, start_idxs, tau, test_tdim):
+
+    dat_shp = [len(start_idxs)*test_tdim, obs.shape[-1]]
+    obs_data = np.zeros(dat_shp, dtype=obs.dtype)
+
+    for i, idx in enumerate(start_idxs):
+        i0 = i*test_tdim
+        ie = i*test_tdim + test_tdim
+
+        obs_data[i0:ie] = obs[(idx+tau):(idx+tau+test_tdim)]
+
+    return obs_data
+
+
+def build_trial_obs_from_h5(h5file, tau):
 
     assert(h5file is not None and type(h5file) == tb.File)
 
     try:
         obs = h5file.root.data.anomaly_srs[:]
-        test_start_idxs = h5file.root.data.test_start_idxs[:]
-        fcast_times = h5file.root.data.fcast_times[:]
-        fcasts = h5file.list_nodes(h5file.root.data.fcast_bin)
-        eofs = h5file.root.data.eofs[:]
+        start_idxs = h5file.root.data.test_start_idxs[:]
+        yrsize = h5file.root.data._v_attrs.yrsize
         test_tdim = h5file.root.data._v_attrs.test_tdim
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
-        return None
 
-    atom = tb.Atom.from_dtype(obs.dtype)
-    corr_shp = [len(fcast_times), obs.shape[1]]
+    tau_months = tau*yrsize
 
-    try:
-        corr_out = Dt.empty_hdf5_carray(h5file, parent, node_name, atom,
-                                        corr_shp,
-                                        title="Spatial Correlation",
-                                        createparents=True)
-    except tb.FileModeError:
-        corr_out = np.zeros(corr_shp)
+    return build_trial_obs(obs, start_idxs, tau_months, test_tdim)
 
-    for i, lead in enumerate(fcast_times):
-        print 'Calculating Correlation: %i yr fcast' % lead
-        compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
-        data = fcasts[i].read()
-        phys_fcast = build_trial_fcast(data, eofs)
 
-        # for j, trial in enumerate(data):
-        #     phys_fcast = np.dot(trial.T, eofs[j].T)
-        #     corr_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
+def calc_anomaly(data, yrsize, climo=None):
+    old_shp = data.shape
+    new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
+    if climo is None:
+        climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
+    anomaly = data.reshape(new_shp) - climo
+    return anomaly.reshape(old_shp), climo
 
-        corr_out[i] = St.calc_lac(phys_fcast, compiled_obs)
 
-    return corr_out
+# TODO: Implement correct significance testing
+def calc_corr_signif(fcast, obs):
+
+    assert(fcast.shape == obs.shape)
+
+    corr_neff = St.calc_n_eff(fcast, obs)
+    corr = St.calc_lac(fcast, obs)
+
+    signif = np.empty_like(corr, dtype=np.bool)
+
+    if True in (abs(corr) < 0.5):
+        g_idx = np.where(abs(corr) < 0.5)
+        gen_2std = 2./np.sqrt(corr_neff[g_idx])
+        signif[g_idx] = (abs(corr[g_idx]) - gen_2std) > 0
+
+    if True in (abs(corr) >= 0.5):
+        z_idx = np.where(abs(corr) >= 0.5)
+        z = 1./2 * np.log((1 + corr[z_idx]) / (1 - corr[z_idx]))
+        z_2std = 2. / np.sqrt(corr_neff[z_idx] - 3)
+        signif[z_idx] = (abs(z) - z_2std) > 0
+
+    # if True in ((corr_neff <= 3) & (abs(corr) >= 0.5)):
+    #     assert(False) # I have to figure out how to implement T_Test
+    #     trow = np.where((corr_neff <= 20) & (corr >= 0.5))
+
+    return corr, signif
 
 
 def fcast_ce(h5file):
@@ -120,110 +178,54 @@ def fcast_ce(h5file):
             ce_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
 
         ce_out[i] /= float(len(data))
-    
+
     return ce_out
 
 
-def calc_anomaly(data, yrsize, climo=None):
-    old_shp = data.shape
-    new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
-    if climo is None:
-        climo = data.reshape(new_shp).mean(axis=0)
-    anomaly = data.reshape(new_shp) - climo
-    return anomaly.reshape(old_shp), climo
-
-
-def build_trial_obs(obs, start_idxs, tau, test_tdim):
-
-    dat_shp = [len(start_idxs)*test_tdim, obs.shape[-1]]
-    obs_data = np.zeros(dat_shp, dtype=obs.dtype)
-
-    for i, idx in enumerate(start_idxs):
-        i0 = i*test_tdim
-        ie = i*test_tdim + test_tdim
-
-        obs_data[i0:ie] = obs[(idx+tau):(idx+tau+test_tdim)]
-        
-    return obs_data
-
-
-def build_trial_obs_from_h5(h5file, tau):
+def fcast_corr(h5file):
+    node_name = 'corr'
+    parent = '/stats'
 
     assert(h5file is not None and type(h5file) == tb.File)
 
     try:
         obs = h5file.root.data.anomaly_srs[:]
-        start_idxs = h5file.root.data.test_start_idxs[:]
+        test_start_idxs = h5file.root.data.test_start_idxs[:]
+        fcast_times = h5file.root.data.fcast_times[:]
+        fcasts = h5file.list_nodes(h5file.root.data.fcast_bin)
+        eofs = h5file.root.data.eofs[:]
         yrsize = h5file.root.data._v_attrs.yrsize
         test_tdim = h5file.root.data._v_attrs.test_tdim
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
+        return None
 
-    tau_months = tau*yrsize
+    atom = tb.Atom.from_dtype(obs.dtype)
+    corr_shp = [len(fcast_times), obs.shape[1]]
 
-    return build_trial_obs(obs, start_idxs, tau_months, test_tdim)
-
-
-def build_trial_fcast(fcast_trials, eofs):
-
-    t_shp = fcast_trials.shape
-    dat_shp = [t_shp[0]*t_shp[-1], eofs.shape[1]]
-    phys_fcast = np.zeros(dat_shp, dtype=fcast_trials.dtype)
-
-    for i, (trial, eof) in enumerate(izip(fcast_trials, eofs)):
-        i0 = i*t_shp[-1]  # i * (test time dimension)
-        ie = i*t_shp[-1] + t_shp[-1]
-
-        phys_fcast[i0:ie] = np.dot(trial.T, eof.T)
-
-    return phys_fcast
-
-
-def build_trial_fcast_from_h5(h5file, fcast_idx):
-
-    assert(h5file is not None and type(h5file) == tb.File)
     try:
-        fcast_trials = h5file.list_nodes(h5file.root.data.fcast_bin)[fcast_idx].read()
-        eofs = h5file.root.data.eofs.read()
-    except tb.NodeError as e:
-        raise type(e)(e.message + ' Returning without finishing operation...')
+        corr_out = Dt.empty_hdf5_carray(h5file, parent, node_name, atom,
+                                        corr_shp,
+                                        title="Spatial Correlation",
+                                        createparents=True)
+    except tb.FileModeError:
+        corr_out = np.zeros(corr_shp)
 
-    return build_trial_fcast(fcast_trials, eofs)
+    for i, lead in enumerate(fcast_times):
+        print 'Calculating Correlation: %i yr fcast' % lead
+        compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
+        data = fcasts[i].read()
+        phys_fcast = build_trial_fcast(data, eofs)
 
+        # for j, trial in enumerate(data):
+        #     phys_fcast = np.dot(trial.T, eofs[j].T)
+        #     corr_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
 
-def calc_corr_signif(fcast, obs):
+        corr_out[i] = St.calc_lac(phys_fcast, compiled_obs)
 
-    assert(fcast.shape == obs.shape)
+    return corr_out
 
-    corr_neff = St.calc_n_eff(fcast, obs)
-    corr = St.calc_lac(fcast, obs)
-
-    signif = np.empty_like(corr, dtype=np.bool)
-
-    if True in (abs(corr) < 0.5):
-        g_idx = np.where(abs(corr) < 0.5)
-        gen_2std = 2./np.sqrt(corr_neff[g_idx])
-        signif[g_idx] = (abs(corr[g_idx]) - gen_2std) > 0
-
-    if True in (abs(corr) >= 0.5):
-        z_idx = np.where(abs(corr) >= 0.5)
-        z = 1./2 * np.log((1 + corr[z_idx]) / (1 - corr[z_idx]))
-        z_2std = 2. / np.sqrt(corr_neff[z_idx] - 3)
-        signif[z_idx] = (abs(z) - z_2std) > 0
-
-    # if True in ((corr_neff <= 3) & (abs(corr) >= 0.5)):
-    #     assert(False) # I have to figure out how to implement T_Test
-    #     trow = np.where((corr_neff <= 20) & (corr >= 0.5))
-
-    return corr, signif
-
-
-def area_wgt(data, lats):
-    assert(data.shape[-1] == lats.shape[-1])
-    scale = np.sqrt(np.cos(np.radians(lats)))
-    return data * scale
-
-
+# TODO: Determine if this method is still necessary at all
 def load_landsea_mask(maskfile, tile_len):
     f_mask = ncf.netcdf_file(maskfile)
     land_mask = f_mask.variables['land']
@@ -351,107 +353,3 @@ def plot_spatial(lats, lons, data, title, outfile=None):
         plt.savefig(outfile, format='png')
     else:
         plt.show()
-
-
-def plot_vstau(fcast_data, eof_data, obs, obs_tidxs, loc, title, outfile):
-    fcast_tlim = fcast_data.shape[1]
-    evar = np.zeros(fcast_tlim)
-    for tau in range(fcast_tlim):
-        tmpdata = fcast_data[:, tau]
-        reconstructed = np.array([
-                                 np.dot(eof_data[loc], fcast)
-                                 for fcast in tmpdata
-                                 ])
-        truth = np.array([obs.T[loc, idxs] for idxs in obs_tidxs])
-        error = reconstructed - truth
-        evar[tau] = error.var()
-        
-    fig, ax = plt.subplots()
-    ax.plot(evar)
-    ax.set_title(title)
-    ax.set_xlabel('Lead time (months)')
-    ax.set_ylabel('Error Variance (K)')
-    fig.savefig(outfile, format='png')
-
-
-def plot_vstime(obs, loc):
-    #Variance and mean vs time sample in true space
-    var_vs_time = np.array([obs.T[loc, 0:i].var() 
-                            for i in range(1, obs.shape[0])])
-    mean_vs_time = np.array([obs.T[loc, 0:i].mean()
-                            for i in range(1, obs.shape[0])])
-    varfig, varax = plt.subplots()
-    varax.plot(var_vs_time, label='Variance')
-    varax.plot(mean_vs_time, label='Mean')
-    varax.axvline(x=0, color='r')
-    #varax.axvline(x = time_dim, color = 'r')
-    #varax.axvline(x = forecast_tlim, color = 'y')
-    #varax.axvline(x = shp_anomaly.shape[0], color = 'y')
-    varax.axhline(y=0, linewidth=1, c='k')
-    varax.set_title('variance and mean w/ increasing time sample')
-    varax.set_xlabel('Times included (0 to this month)')
-    varax.set_ylabel('Variance & Mean (K)')
-    varax.legend(loc=9)
-    varfig.show()
-    
-    runfig, runax = plt.subplots()
-    runax.plot(obs.T[loc, :])
-    runax.set_title('Time series at loc = %i (12-mon running mean)' % loc)
-    runax.set_xlabel('Month')
-    runax.set_ylabel('Temp Anomaly (K)')
-    runfig.show()
-
-
-def plot_vstrials(fcast_data, obs, test_tidxs, test_tdim, tau, loc):
-    num_trials = fcast_data.shape[0]/test_tdim
-    anom_truth = build_trial_obs(obs, test_tidxs, tau, test_tdim)
-    loc_tru_var = anom_truth[:, loc].var()
-    print loc_tru_var
-    loc_tru_mean = anom_truth[:, loc].mean()
-    
-    fcast_var = np.zeros(num_trials)
-    fcast_mean = np.zeros(num_trials)
-    
-    for i in xrange(num_trials):
-        end = i*test_tdim + test_tdim
-        fcast_var[i] = fcast_data[0:end, loc].var()
-        fcast_mean[i] = fcast_data[0:end, loc].mean()
-    
-    fig, ax = plt.subplots(2, 1, sharex=True)
-    
-    ax[0].plot(fcast_var, color='b', linewidth=2, label='Fcast Var')
-    ax[0].axhline(loc_tru_var, xmin=0, xmax=num_trials,
-                  linestyle='--', color='k', label='True Var')
-    ax[0].legend(loc=4)
-    ax[1].plot(fcast_mean, linewidth=2, label='Fcast Mean')
-    ax[1].axhline(loc_tru_mean, xmin=0, xmax=num_trials,
-                  linestyle='--', color='k', label='True Mean')
-    ax[1].legend()
-    
-    # Interesting case of line matching below here
-    #for line, var in zip(ax[0].get_lines(), true_var):
-    #    ax[0].axhline(y=var, linestyle = '--', color = line.get_color())
-    
-    ax[0].set_title('Forecast Variance & Mean vs. # Trials (Single Gridpoint)'
-                    ' Tau = %i' % tau)
-    ax[0].set_ylim(0, 0.8)
-    ax[1].set_xlabel('Trial #')
-    ax[0].set_ylabel('Variance (K)')
-    ax[1].set_ylabel('Mean (K)')
-    fig.show()
-    
-
-if __name__ == "__main__":
-    if os.name == 'nt':
-        outf = 'G:\Hakim Research\pyLIM\LIM_data.h5'
-        #outf = 'G:\Hakim Research\pyLIM\Trend_LIM_data.h5'
-    else:
-        #outf = '/home/chaos2/wperkins/data/pyLIM/LIM_data.h5'
-        #outf = '/home/chaos2/wperkins/data/pyLIM/Detrend_LIM_data.h5'
-        outf = '/home/chaos2/wperkins/data/pyLIM/Trended_sepEOFs_LIM_data.h5'
-    h5f = tb.open_file(outf, mode='a')
-    try:
-        corr = fcast_corr(h5f)
-        ce = fcast_ce(h5f)
-    finally:
-        h5f.close()
