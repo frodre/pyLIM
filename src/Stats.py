@@ -1,5 +1,6 @@
 """
-Toolbox for statistical methods.
+Toolbox for statistical methods.  For all methods this toolbox assumes that
+the first dimension is the temporal sampling dimension.
 
 """
 
@@ -41,6 +42,8 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
     assert(dshape[0] >= window_size), ("Window size must be smaller than or "
                                        "equal to the length of the time "
                                        "dimension of the data.")
+
+    # Determine how much data is removed from beginning and end
     if shave_yr:
         tedge = window_size//2
         cut_from_top = year_len * int(ceil(tedge/float(year_len)))
@@ -56,6 +59,7 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
     assert(new_shape[0] > 0), ("Not enough data to trim partial years from "
                                "edges.  Please try with shaveYr=False")
 
+    # Allocate memory and perform running mean
     result = np.zeros(new_shape, dtype=data.dtype)
         
     for i in xrange(new_shape[0]):
@@ -69,8 +73,8 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
 def calc_eofs(data, num_eigs, ret_pcs=False):
     """
     Method to calculate the EOFs of given  dataset.  This assumes data comes in as
-    an m x n matrix where m is the spatial dimension and n is the sampling
-    dimension.  
+    an m x n matrix where m is the temporal dimension and n is the spatial
+    dimension.
 
     Parameters
     ----------
@@ -83,15 +87,19 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
 
     Returns
     -------
+    eofs: ndarray
+        The eofs (as column vectors) of the data with dimensions n x k where
+        k is the num_eigs.
+    svals: ndarray
+        Singular values from the svd decomposition.  Returned as a row vector
+        in order from largest to smallest.
+    """
 
-    """  # TODO: Finish returns, make m x n  (temporal x spatial) consistent
-    
-    eofs, svals, pcs = svds(data, k=num_eigs)
+    # TODO: check if this is close to svd method
+    eofs, svals, pcs = svds(data.T, k=num_eigs)
     eofs = eofs[:, ::-1]
     svals = svals[::-1]
     pcs = pcs[::-1]
-    # eig_vals = (svals ** 2) / (len(e) - 1.)
-    # tot_var = (eig_vals[0:num_eigs].sum()) / eig_vals.sum()
 
     if ret_pcs:
         return eofs, svals, pcs
@@ -110,19 +118,29 @@ def calc_ce(fcast, trial_obs, obs):
         Time series of forecast data. M x N where M is the temporal dimension.
     obs: ndarray
         Time series of observations. M x N
-    """  # TODO: Finish returns
+
+    Returns
+    -------
+    CE: ndarray
+        Coefficient of efficiency for all locations over the time range.
+    """
 
     assert(fcast.shape == trial_obs.shape)
 
-    cvar = obs.var(axis=0)
+    # Climatological variance
+    cvar = obs.var(axis=0, ddof=1)
+
+    # Error variance
     error = ne.evaluate('(trial_obs - fcast)**2')
     evar = error.sum(axis=0)/(len(error))
+
     return 1 - evar/cvar
 
 
 def calc_lac(fcast, obs):
     """
-    Method to calculate the Local Anomaly Correlation (LAC).
+    Method to calculate the Local Anomaly Correlation (LAC).  Uses numexpr
+    for speed over larger datasets.
     
     Note: If necessary (memory concerns) in the future, the numexpr statements
     can be extended to use pytable arrays.  Would need to provide means to 
@@ -134,12 +152,21 @@ def calc_lac(fcast, obs):
         Time series of forecast data. M x N where M is the temporal dimension.
     obs: ndarray
         Time series of observations. M x N
+
+    Returns
+    -------
+    lac: ndarray
+        Local anomaly corellations for all locations over the time range.
     """
-    
+    # Calculate means of data
     f_mean = fcast.mean(axis=0)
     o_mean = obs.mean(axis=0)
+
+    # Calculate covariance between time series
     cov = ne.evaluate('(fcast - f_mean) * (obs - o_mean)')
     cov = cov.sum(axis=0)
+
+    # Calculate standarization terms
     f_std = ne.evaluate('(fcast - f_mean)**2')
     f_std = np.sqrt(f_std.sum(axis=0))
     o_std = ne.evaluate('(obs - o_mean)**2')
@@ -150,7 +177,30 @@ def calc_lac(fcast, obs):
 
 
 def calc_n_eff(data1, data2=None):
+    """
+    Calculate the effective degrees of freedom for data using lag-1
+    autocorrelation.
 
+    Parameters
+    ----------
+    data1: ndarray
+        Dataset to calculate effective degrees of freedom for.  Assumes
+        first dimension is the temporal dimension.
+    data2: ndarray, optional
+        A second dataset to calculate the effective degrees of freedom
+        for covariances/correlations etc.
+
+    Returns
+    -------
+    n_eff: ndarray
+        Effective degrees of freedom for input data.
+    """
+
+    if data2 is not None:
+        assert data1.shape == data2.shape,\
+            'Data must have have same shape for combined n_eff calculation'
+
+    # Lag-1 autocorrelation
     r1 = calc_lac(data1[0:-1], data1[1:])
     n = len(data1)
 
@@ -164,9 +214,38 @@ def calc_n_eff(data1, data2=None):
 
 
 def calc_anomaly(data, yrsize, climo=None):
+    """
+    Caculate anomaly for the given data.  Right now it assumes sub-annual data
+    input so that the climatology subtracts means for each month instead
+    of the mean of the entire series.
+
+    Note: May take yrsize argument out and leave it to user to format data
+    as to take the desired anomaly.
+
+    Parameters
+    ----------
+    data: ndarray
+        Input data to calculate the anomaly from.  Leading dimension should be
+        the temporal axis.
+    yrsize: int
+        Number of elements that compose a full year.  Used to reshape the data
+        time axis to num years x size year for climatology purposes.
+    climo: ndarray, optional
+        User-provided climatology to subtract from the data.  Must be
+        broadcastable over the time-dimension of data
+
+    Returns
+    -------
+    anomaly: ndarray
+        Data converted to its anomaly form.
+    """
+
+    # Reshape to take monthly mean
     old_shp = data.shape
-    new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
+    new_shp = (old_shp[0]//yrsize, yrsize, old_shp[1])
+
     if climo is None:
         climo = data.reshape(new_shp).mean(axis=0)
+
     anomaly = data.reshape(new_shp) - climo
     return anomaly.reshape(old_shp), climo
