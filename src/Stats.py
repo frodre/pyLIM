@@ -95,7 +95,6 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
         in order from largest to smallest.
     """
 
-    # TODO: check if this is close to svd method
     eofs, svals, pcs = svds(data.T, k=num_eigs)
     eofs = eofs[:, ::-1]
     svals = svals[::-1]
