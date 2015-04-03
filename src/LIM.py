@@ -19,7 +19,8 @@ def _area_wgt(data, lats):
 
 
 def _calc_m(x0, xt):
-    """Calculate either L or G for forecasting"""
+    """Calculate either L or G for forecasting (using nomenclature
+    from Newman 2013"""
     
     # These represent the C(tau) and C(0) covariance matrices
     #    Note: x is an anomaly vector, no division by N-1 because it's undone
@@ -33,6 +34,9 @@ def _calc_m(x0, xt):
 
 
 def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
+    """
+    Helper method for creating forecast groups in the hdf5 file.
+    """
     try:
         out_fcast = [h5f.create_carray(dest,
                                        'f{:d}'.format(lead),
@@ -101,7 +105,6 @@ class LIM(object):
         area_wgt_lats: ndarray, Optional
             Latitude vector pertaining to spatial dimension N.  If used area-
             weighting will be performed for pricipal component calculations.
-            TODO: add ability to provide a simple non-tiled lat vector
         lons: ndarray, Optional
             Longitude vector flattened to spatial dimension N.
         H5file: HDF5_Object, Optional
@@ -172,11 +175,12 @@ class LIM(object):
 
         # Calculate anomaly time series from the data
         self._run_mean, _bedge, _tedge = run_mean(self._calibration,
-                                                     self._wsize,
-                                                     shave_yr=True)
+                                                  self._wsize,
+                                                  shave_yr=True)
         self._anomaly_srs, self._climo = Lt.calc_anomaly(self._run_mean,
                                                          self._wsize)
-        
+
+        # TODO: Does it make sense to feed in the calibration climo?
         # Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
         t0_data, _ = calc_anomaly(t0_data, self._wsize, self._climo)  # M^xN
@@ -209,7 +213,7 @@ class LIM(object):
         
         # Calibrate the LIM with (J=neigs) EOFs from training data
         eofs, _ = calc_eofs(data.T, self._neigs)         # eofs is NxJ
-        train_data = dot(eofs.T, self._anomaly_srs.T)             # JxM^
+        train_data = dot(eofs.T, data)             # JxM^
         
         # Project our testing data into eof space
         proj_t0_data = dot(eofs.T, t0_data.T)                     # JxM^
@@ -318,12 +322,58 @@ class LIM(object):
                                   self.spatial_valid,
                                   title='Valid Spatial Locations')
 
+        return h5f
+
 
 class ResampleLIM(LIM):
+    """
+    Linear Inverse Model Forecasts using resampling experiments.  This
+    will take in a single dataset and withold a certain portion during
+    calibration.  Repeated trials are performed using the withheld data
+    to forecast on.
+
+    See the LIM Class docstring for references.
+    """
 
     def __init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
                  hold_chk_pct, num_trials, area_wgt_lats=None, lons=None,
                  h5file=None):
+        """
+        Parameters
+        ----------
+        data_in: DataTools.DataInput
+            Dataset for determining LIM forecast EOFs.  DataInput provids
+            a 2D MxN matrix where M (rows) represent temporal samples and
+            N(columns) represent spatial samples.  It handles data with
+            nan masking.  Note: If data is masked, saved output spatial
+            dimensions will be reduced to valid data.
+        wsize: int
+            Windowsize for running mean.  For this implementation it should
+            be equal to a year's worth of samples
+        fcast_times: array_like
+            1D array-like object containing all times to forecast at with the
+            LIM. Times should be in wsize units. i.e. 1yr forecast should
+            be integer value "1" not 12 (if wsize=12).
+        fcast_num_pcs: int
+            Number of principal components to include in forecast calculations
+        hold_chk_pc: float
+            The percentage of data to withhold during each trial of the
+            resampling experiment.
+        num_trials: int
+            Number of trials to run during the resampling experiment.
+            Note: Consider the windowsize when you determine the number of
+            trials.  A large number of trials may result in significant
+            overlaps between trials and skew your statistics due to
+            repeated sampling of middle data.
+        area_wgt_lats: ndarray, Optional
+            Latitude vector pertaining to spatial dimension N.  If used area-
+            weighting will be performed for pricipal component calculations.
+        lons: ndarray, Optional
+            Longitude vector flattened to spatial dimension N.
+        H5file: HDF5_Object, Optional
+            File object to store LIM output.  It will create a series of
+            directories under the given group
+        """
 
         LIM.__init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
                      area_wgt_lats, lons, h5file)
@@ -356,6 +406,40 @@ class ResampleLIM(LIM):
         self._anom_edges = [bedge, tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):
+        """Run LIM forecast using resampling
+
+        Performs LIM forecast over the times specified by the
+        fcast_times class attribute.  Forecast can be performed by calculating
+        G for each time period or by L for a 1-year(or window_size) lag and
+        then calculating each fcast_Time G from that L matrix.
+
+        Resampling is determined by hold_chk_pct and num_trials.
+
+        Parameters
+        ----------
+        use_lag1: bool
+            Flag for using only the G_1-matrix for forecasting
+        detrend_data: bool
+            Apply linear detrending to anomaly timeseries data
+        use_h5: bool
+            Use H5file to store forecast data instead of an ndarray.
+
+
+        Returns
+        -----
+        _fcast_out: ndarray-like
+            LIM forecasts in a KxTxJxM^ matrix where K corresponds to each
+            forecast time and T corresponds to each trial.
+        _eofs_out: ndarray-like
+            EOFs for converting forecast output between EOF and physical
+            space.  Returned in an TxNxJ matrix.
+
+
+        Notes
+        -----
+        This method will set the fcast_out attribute for the LIM. If an HDF5
+        obj is provided it will output the forecast to this file if desired.
+        """
 
         eof_shp = [self._num_trials,
                    self._original_obs.shape[1],
@@ -419,8 +503,15 @@ class ResampleLIM(LIM):
 
         WARNING: If filename already exists it will be overwritten!
 
-        :param h5file: new HDF5 file to store data
-        :return: created HDF5 file
+        Parameters
+        ----------
+        h5file: tables.File
+            new HDF5 file to store data
+
+        Returns
+        -------
+        h5f: tables.File
+            HDF5 file that data was stored in.
         """
 
         if h5file is not None:
@@ -480,7 +571,7 @@ class ResampleLIM(LIM):
         data_grp._v_attrs.test_tdim = self._test_tdim
         data_grp._v_attrs.yrsize = self._wsize
 
-
+        return h5f
 
 # This class will be experimental at most.
 # Have to make the assumption that anomaly uses entire sample average
