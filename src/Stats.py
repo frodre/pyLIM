@@ -5,12 +5,11 @@ Toolbox for statistical methods.
 
 import numpy as np
 import numexpr as ne
-import tables as tb
-from math import ceil
+from math import ceil, floor
 from scipy.sparse.linalg import svds
 
 
-def run_mean(data, window_size, shave_yr=False):
+def run_mean(data, window_size, shave_yr=False, year_len=12):
     """
     A function for calculating the running mean on data.
 
@@ -21,6 +20,12 @@ def run_mean(data, window_size, shave_yr=False):
         space(column) format.
     window_size: int
         Size of the window to compute the running mean over.
+    shave_yr: bool, optional
+        The running mean will remove ends off the data. If shave_yr is true it
+        will remove an full year_len chunk from the ends instead of a
+        partial chunk.
+    year_len: int, optional
+        Number of elements in a timeseries that represents a full year.
 
     Returns
     -------
@@ -33,18 +38,17 @@ def run_mean(data, window_size, shave_yr=False):
     """
     
     dshape = data.shape
-    yrsize = 12
     assert(dshape[0] >= window_size), ("Window size must be smaller than or "
                                        "equal to the length of the time "
                                        "dimension of the data.")
     if shave_yr:
-        tedge = window_size/2
-        cut_from_top = yrsize*int(ceil(tedge/12.0))
-        bedge = (window_size/2) + (window_size % 2) - 1
-        cut_from_bot = yrsize*int(ceil(bedge/12.0))
+        tedge = window_size//2
+        cut_from_top = year_len * int(ceil(tedge/float(year_len)))
+        bedge = (window_size//2) + (window_size % 2) - 1
+        cut_from_bot = year_len * int(ceil(bedge/float(year_len)))
     else:
-        cut_from_top = window_size/2
-        bedge = cut_from_bot = (window_size/2) + (window_size % 2) - 1
+        cut_from_top = window_size//2
+        bedge = cut_from_bot = (window_size//2) + (window_size % 2) - 1
     tot_cut = cut_from_top + cut_from_bot
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
@@ -55,8 +59,6 @@ def run_mean(data, window_size, shave_yr=False):
     result = np.zeros(new_shape, dtype=data.dtype)
         
     for i in xrange(new_shape[0]):
-        #if i % 100 == 0:
-        #    print 'Calc for index %i' % i
         cntr = cut_from_bot - bedge + i
         result[i] = (data[cntr:(cntr+window_size)].sum(axis=0) /
                      float(window_size))
