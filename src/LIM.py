@@ -121,7 +121,6 @@ class LIM(object):
         self._H5file = h5file
         self._obs_use = None
         self._anomaly_srs = None
-        self._climo = None
         self._run_mean = None
         self.masked_input = data_in.is_masked
 
@@ -177,13 +176,12 @@ class LIM(object):
         self._run_mean, _bedge, _tedge = run_mean(self._calibration,
                                                   self._wsize,
                                                   shave_yr=True)
-        self._anomaly_srs, self._climo = Lt.calc_anomaly(self._run_mean,
+        self._anomaly_srs, _ = Lt.calc_anomaly(self._run_mean,
                                                          self._wsize)
 
-        # TODO: Does it make sense to feed in the calibration climo?
         # Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
-        t0_data, _ = calc_anomaly(t0_data, self._wsize, self._climo)  # M^xN
+        t0_data, _ = calc_anomaly(t0_data, self._wsize)  # M^xN
 
         # Create output locations for our forecasts
         fcast_out_shp = [len(self.fcast_times), self._neigs, t0_data.shape[0]]
@@ -296,8 +294,6 @@ class LIM(object):
             Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs',
                                   self._anomaly_srs,
                                   title='Observation Anomaly Data')
-            Dt.var_to_hdf5_carray(h5f, data_grp, 'climo', self._climo,
-                                  title='Monthly climatology from Obs')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'fcast_times', self.fcast_times,
                               title='Forecast Lead Times')
         if self._lats is not None:
@@ -401,8 +397,8 @@ class ResampleLIM(LIM):
         self._obs_run_mean, bedge, tedge = run_mean(self._calibration,
                                                     wsize,
                                                     shave_yr=True)
-        self._full_anomaly_srs, self._full_climo = \
-            calc_anomaly(self._obs_run_mean, self._wsize)
+        self._full_anomaly_srs, _ = calc_anomaly(self._obs_run_mean,
+                                                 self._wsize)
         self._anom_edges = [bedge, tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):
@@ -541,8 +537,6 @@ class ResampleLIM(LIM):
         Dt.var_to_hdf5_carray(h5f, data_grp, 'anomaly_srs',
                               self._full_anomaly_srs,
                               title='Observation Anomaly Data')
-        Dt.var_to_hdf5_carray(h5f, data_grp, 'climo', self._full_climo,
-                              title='Monthly climatology from Obs')
         Dt.var_to_hdf5_carray(h5f, data_grp, 'fcast_times', self.fcast_times,
                               title='Forecast Lead Times')
         if self._lats is not None:
