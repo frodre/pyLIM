@@ -11,8 +11,6 @@ from itertools import izip
 
 import matplotlib.cm as cm
 
-__all__ = ['calc_anomaly']
-
 #custom colormap information, trying to reproduce Newman
 lb = tuple(np.array([150, 230, 255])/255.0)
 w = (1.0, 1.0, 1.0)
@@ -198,7 +196,6 @@ def fcast_corr(h5file):
         test_tdim = h5file.root.data._v_attrs.test_tdim
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
-        return None
 
     atom = tb.Atom.from_dtype(obs.dtype)
     corr_shp = [len(fcast_times), obs.shape[1]]
