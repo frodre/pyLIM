@@ -1,4 +1,5 @@
 #-*- coding: utf-8 -*-
+
 from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16, copy
 from numpy import linspace, unique, concatenate, copy
 from numpy.linalg import pinv
@@ -7,7 +8,6 @@ from math import ceil
 import tables as tb
 
 from Stats import calc_eofs, run_mean, calc_anomaly
-import LIMTools as Lt
 import DataTools as Dt
 
 

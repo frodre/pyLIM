@@ -105,7 +105,7 @@ class DataObject(object):
         self.is_detrended = False
 
 
-def var_to_hdf5_carray(h5file, group, node, data, kwargs):
+def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
     """
     Take an input data and insert into a PyTables carray in an HDF5 file.
 
@@ -158,7 +158,7 @@ def var_to_hdf5_carray(h5file, group, node, data, kwargs):
     return out_arr
 
 
-def empty_hdf5_carray(h5file, group, node, in_atom, shape, kwargs):
+def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
     """
     Create an empty PyTables carray.  Replaces node if it already exists.
 
