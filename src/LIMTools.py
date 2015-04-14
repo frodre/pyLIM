@@ -349,29 +349,6 @@ def fcast_corr(h5file):
         corr_out[i] = St.calc_lac(phys_fcast, compiled_obs)
 
     return corr_out
-
-# TODO: Determine if this method is still necessary at all
-def load_landsea_mask(maskfile, tile_len):
-    f_mask = ncf.netcdf_file(maskfile)
-    land_mask = f_mask.variables['land']
-
-    try:
-        sf = land_mask.scale_factor
-        offset = land_mask.add_offset
-        land_mask = land_mask.data*sf + offset
-    except AttributeError:
-        land_mask = land_mask.data
-
-    land_mask = land_mask.squeeze().astype(np.int16).flatten()
-    sea_mask = np.logical_not(land_mask)
-
-    tiled_landmask = np.repeat(np.expand_dims(land_mask, 0),
-                               tile_len,
-                               axis=0)
-    tiled_seamask = np.repeat(np.expand_dims(sea_mask, 0),
-                              tile_len,
-                              axis=0)
-    return tiled_landmask, tiled_seamask
     
 ####  PLOTTING FUNCTIONS  ####
 
