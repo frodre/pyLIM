@@ -235,6 +235,7 @@ class LIM(object):
         
         # Forecasts using G only    
         else:
+            # Training data has to allow for lag of max forecast time
             train_tdim = train_data.shape[1] - self.fcast_times[-1]*self._wsize
             x0 = train_data[:, 0:train_tdim]
             
