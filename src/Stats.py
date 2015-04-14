@@ -1,5 +1,5 @@
 """
-Toolbox for statistical methods.  For all methods this toolbox assumes that
+Toolbox for statistical methods.  For all functions, this toolbox assumes that
 the first dimension is the temporal sampling dimension.
 
 """

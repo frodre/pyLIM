@@ -1,17 +1,20 @@
-import os
 import tables as tb
 import numpy as np
-import Stats as St
-import DataTools as Dt
 import matplotlib.pyplot as plt
 import scipy.io.netcdf as ncf
+import matplotlib.cm as cm
 from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
 from itertools import izip
 
-import matplotlib.cm as cm
 
-#custom colormap information, trying to reproduce Newman
+import Stats as St
+import DataTools as Dt
+
+
+""" Methods to help with common LIM tasks."""
+
+#custom colormap information, trying to reproduce Newman colorbar
 lb = tuple(np.array([150, 230, 255])/255.0)
 w = (1.0, 1.0, 1.0)
 yl = tuple(np.array([243, 237, 48])/255.0)
@@ -40,12 +43,51 @@ newm = LinearSegmentedColormap('newman', cdict)
 
 
 def area_wgt(data, lats):
+    """
+    Area weighting function for an input dataset.  Assumes same length trailing
+    dimension of two input parameters.
+
+    Parameters
+    ----------
+    data: ndarray
+        Input dataset to be area weighted.  Spatial dimensions should be last.
+    lats: ndarray
+        Latitude array corresponding to the data.  Right now trailing dimensions
+        must match. (allows for broadcasting)
+
+    Returns
+    -------
+    ndarray
+        Area weighted data.
+    """
     assert(data.shape[-1] == lats.shape[-1])
     scale = np.sqrt(np.cos(np.radians(lats)))
     return data * scale
 
 
 def build_trial_fcast(fcast_trials, eofs):
+    """
+    Build forecast dataset from trials and EOFs.  This stacks the forecast
+    trials sequentially along the temporal dimension.  I.e. a forecast_trials
+    with dimensions of  trials x time samples x spatial (if it's been converted
+    out of eof space)  would be built with dimensions of
+    (trials * time samples) x spatial.
+
+    Parameters
+    ----------
+    fcast_trials: ndarray
+        LIM forecast output in EOF space.
+        Dimensions of trials x num_eigs x num_samples
+    eofs: ndarray
+        Empirical orthogonal functions corresponding to each trial.
+        Dimensions of trials x spatial x num_eigs
+
+    Returns
+    -------
+    ndarray
+        Forecast trials stacked along the temporal dimensions and converted to
+        physical space.
+    """
 
     t_shp = fcast_trials.shape
     dat_shp = [t_shp[0]*t_shp[-1], eofs.shape[1]]
@@ -60,11 +102,26 @@ def build_trial_fcast(fcast_trials, eofs):
     return phys_fcast
 
 
-def build_trial_fcast_from_h5(h5file, fcast_idx):
+def build_trial_fcast_from_h5(h5file, tau):
+    """
+    Build forecast dataset from trials and EOFs that are read
+    from the input HDF5 LIM forecast file.
 
+    Parameters
+    ----------
+    h5file: tables.File
+        Pytables HDF5 file holding LIM forecast output.
+    tau: int
+        Forecast lead time to build forecast dataset from
+
+    Returns
+    ndarray
+        Forecast trials stacked along the temporal dimensions and coverted to
+        physical space.
+    """
     assert(h5file is not None and type(h5file) == tb.File)
     try:
-        fcast_trials = h5file.list_nodes(h5file.root.data.fcast_bin)[fcast_idx].read()
+        fcast_trials = h5file.list_nodes(h5file.root.data.fcast_bin)[tau].read()
         eofs = h5file.root.data.eofs.read()
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
@@ -73,7 +130,29 @@ def build_trial_fcast_from_h5(h5file, fcast_idx):
 
 
 def build_trial_obs(obs, start_idxs, tau, test_tdim):
+    """
+    Build observation dataset to compare to a forecast dataset built by
+    the build_trial_fcast...  methods.
 
+    Parameters
+    ----------
+    obs: ndaray
+        Observations to build from.
+        Dimensions of time x space
+    start_idxs: list
+        List of indices corresponding to trial start times in observations.
+    tau: int
+        Lead time of the forecast to which the observations are being
+        compared.
+    test_tdim: int
+        Length of time sample for each trial.
+
+    Returns
+    -------
+    ndarray
+        Observations corresponding to each forecast trial stacked along the
+        temporal dimension.
+    """
     dat_shp = [len(start_idxs)*test_tdim, obs.shape[-1]]
     obs_data = np.zeros(dat_shp, dtype=obs.dtype)
 
@@ -87,7 +166,24 @@ def build_trial_obs(obs, start_idxs, tau, test_tdim):
 
 
 def build_trial_obs_from_h5(h5file, tau):
+    """
+    Build observation dataset from HDF5 file to compare to a forecast
+    datset built by the build_trial_fcast... methods.
 
+    Parameters
+    ----------
+    h5file: tables.File
+        Pytables HDF5 file holding LIM observation data.
+    tau: int
+        Lead time of the forecast to which the observations are being
+        compared.
+
+    Returns
+    -------
+    ndarray
+        Observations corresponding to each forecast tiral stacked along the
+        temporal dimension.
+    """
     assert(h5file is not None and type(h5file) == tb.File)
 
     try:
@@ -103,18 +199,11 @@ def build_trial_obs_from_h5(h5file, tau):
     return build_trial_obs(obs, start_idxs, tau_months, test_tdim)
 
 
-def calc_anomaly(data, yrsize, climo=None):
-    old_shp = data.shape
-    new_shp = (old_shp[0]/yrsize, yrsize, old_shp[1])
-    if climo is None:
-        climo = data.reshape(new_shp).sum(axis=0)/float(new_shp[0])
-    anomaly = data.reshape(new_shp) - climo
-    return anomaly.reshape(old_shp), climo
-
-
 # TODO: Implement correct significance testing
 def calc_corr_signif(fcast, obs):
-
+    """
+    Calculate local anomaly correlation along with 95% significance.
+    """
     assert(fcast.shape == obs.shape)
 
     corr_neff = St.calc_n_eff(fcast, obs)
@@ -140,12 +229,32 @@ def calc_corr_signif(fcast, obs):
     return corr, signif
 
 
+# TODO: Fix CE calculation for comparisons and add reference
 def fcast_ce(h5file):
+    """
+    Calculate the coefficient of efficiency for a LIM forecast at every point.
+
+    Parameters
+    ----------
+    h5file: tables.File
+        PyTables HDF5 file containing LIM forecast data.  All necessary
+        variables are loaded from this file.
+
+    Returns
+    -------
+    ndarray
+        Coefficient of efficiency for each forecast lead time
+        (compared against observations)
+
+    References
+    ----------
+    """
     node_name = 'ce'
     parent = '/stats'
 
     assert(h5file is not None and type(h5file) == tb.File)
 
+    # Load necessary data
     try:
         obs = h5file.root.data.anomaly_srs[:]
         test_start_idxs = h5file.root.data.test_start_idxs[:]
@@ -157,9 +266,9 @@ def fcast_ce(h5file):
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
 
+    # Create output location in h5file
     atom = tb.Atom.from_dtype(obs.dtype)
     ce_shp = [len(fcast_times), obs.shape[1]]
-
     try:
         ce_out = Dt.empty_hdf5_carray(h5file, parent, node_name, atom, ce_shp,
                                       title="Spatial Coefficient of Efficiency",
@@ -167,6 +276,7 @@ def fcast_ce(h5file):
     except tb.FileModeError:
         ce_out = np.zeros(ce_shp)
 
+    # Calculate CE
     for i, lead in enumerate(fcast_times):
         print 'Calculating CE: %i yr fcast' % lead
         compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
@@ -181,11 +291,27 @@ def fcast_ce(h5file):
 
 
 def fcast_corr(h5file):
+    """
+    Calculate the local anomaly correlation for a LIM forecast at every point.
+
+    Parameters
+    ----------
+    h5file: tables.File
+        PyTables HDF5 file containing LIM forecast data.  All necessary
+        variables are loaded from this file.
+
+    Returns
+    -------
+    ndarray
+        Local anomaly correlation for each forecast lead time at all points.
+        (compared against observations)
+    """
     node_name = 'corr'
     parent = '/stats'
 
     assert(h5file is not None and type(h5file) == tb.File)
 
+    # Load necessary data
     try:
         obs = h5file.root.data.anomaly_srs[:]
         test_start_idxs = h5file.root.data.test_start_idxs[:]
@@ -197,6 +323,7 @@ def fcast_corr(h5file):
     except tb.NodeError as e:
         raise type(e)(e.message + ' Returning without finishing operation...')
 
+    # Create output location in h5file
     atom = tb.Atom.from_dtype(obs.dtype)
     corr_shp = [len(fcast_times), obs.shape[1]]
 
@@ -208,6 +335,7 @@ def fcast_corr(h5file):
     except tb.FileModeError:
         corr_out = np.zeros(corr_shp)
 
+    # Calculate LAC
     for i, lead in enumerate(fcast_times):
         print 'Calculating Correlation: %i yr fcast' % lead
         compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
@@ -226,17 +354,17 @@ def fcast_corr(h5file):
 def load_landsea_mask(maskfile, tile_len):
     f_mask = ncf.netcdf_file(maskfile)
     land_mask = f_mask.variables['land']
-    
+
     try:
         sf = land_mask.scale_factor
         offset = land_mask.add_offset
         land_mask = land_mask.data*sf + offset
     except AttributeError:
         land_mask = land_mask.data
-        
+
     land_mask = land_mask.squeeze().astype(np.int16).flatten()
     sea_mask = np.logical_not(land_mask)
-    
+
     tiled_landmask = np.repeat(np.expand_dims(land_mask, 0),
                                tile_len,
                                axis=0)
@@ -249,10 +377,31 @@ def load_landsea_mask(maskfile, tile_len):
 
 
 def plot_corrdata(lats, lons, data, title, outfile=None, signif=None):
+    """
+    Plot local anomaly correlation data.  Lats, lons, and data should have the
+    same temporal dimensions.  Lats and lons should denote gridbox edges.
+    e.g. data has spatial dimensions of M (lats) x N (lons) then lats and lons
+    should have dimensions of M+1 x N+1.  Only uses Newman colarmap.
+
+    Parameters
+    ----------
+    lats: ndarray
+        Latitude array (gridbox edges)
+    lons: ndarray
+        Longitude array (gridbox edges)
+    data: ndarray
+        Correlation data
+    title: str
+        Plot title
+    signif: ndarray, optional
+        Boolean ndarray denoting locations that do not pass 95% significance.
+    """
     plt.clf()
+
+    # Colorbar ticks
     contourlev = np.concatenate(([-1], np.linspace(0, 1, 11)))
     cbticks = np.linspace(0, 1, 11)
-    plt.close('all')
+
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
@@ -271,40 +420,44 @@ def plot_corrdata(lats, lons, data, title, outfile=None, signif=None):
         m.scatter(x, y, s=2, c='k', marker='o', alpha=0.5)
 
     plt.title(title)
-    
-    if outfile is not None:
-        plt.savefig(outfile, format='png')
-    else:
-        plt.show()
+    plt.show()
 
 
-def plot_cedata(lats, lons, data, title, outfile=None):
-    #contourlev = np.concatenate(([-1],np.linspace(0,1,11)))
-    #cbticks = np.linspace(0,1,11)
+def plot_cedata(lats, lons, data, title):
+    """
+    Plot coefficient of efficiency data.  Lats, lons, and data should have the
+    same temporal dimensions.  Lats and lons should denote gridbox edges.
+    e.g. data has spatial dimensions of M (lats) x N (lons) then lats and lons
+    should have dimensions of M+1 x N+1.
+
+    Parameters
+    ----------
+    lats: ndarray
+        Latitude array (gridbox edges)
+    lons: ndarray
+        Longitude array (gridbox edges)
+    data: ndarray
+        CE data
+    title: str
+        Plot title
+    """
     plt.close('all')
     m = Basemap(projection='gall', llcrnrlat=-90, urcrnrlat=90,
                 llcrnrlon=0, urcrnrlon=360, resolution='c')
     m.drawcoastlines()
     
-    # contourlev = np.linspace(0, 1, 11)
-    
     if data.min() < 0:
         color = cm.bwr
-        # neglev = np.linspace(-1, 0, 11)
-        # contourlev = np.concatenate((neglev, contourlev))
     else:
         color = cm.OrRd
         
     m.pcolor(lons, lats, data, latlon=True, cmap=color, vmin=-1, vmax=1)
     m.colorbar()
     plt.title(title)
-    if outfile is not None:
-        plt.savefig(outfile, format='png')
-    else:
-        plt.show()
+    plt.show()
 
 
-def plot_spatial(lats, lons, data, title, outfile=None):
+def plot_spatial(lats, lons, data, title):
     """
     Method for basic spatial data plots.  Uses diverging color scheme, so 
     current implementation is best for anomaly data.  Created initially just
@@ -322,8 +475,6 @@ def plot_spatial(lats, lons, data, title, outfile=None):
         Title string for the plot
     outfile: str
         Filename to save the png image as
-    only_pos: bool
-        Changes colormap if you are using only positive values.
     """
     plt.clf()
     plt_range = np.max(np.abs(data))
@@ -345,8 +496,4 @@ def plot_spatial(lats, lons, data, title, outfile=None):
     m.colorbar()
     
     plt.title(title)
-
-    if outfile is not None:
-        plt.savefig(outfile, format='png')
-    else:
-        plt.show()
+    plt.show()

@@ -176,8 +176,8 @@ class LIM(object):
         self._run_mean, _bedge, _tedge = run_mean(self._calibration,
                                                   self._wsize,
                                                   shave_yr=True)
-        self._anomaly_srs, _ = Lt.calc_anomaly(self._run_mean,
-                                                         self._wsize)
+        self._anomaly_srs, _ = calc_anomaly(self._run_mean,
+                                            self._wsize)
 
         # Calculate anomalies for initial data
         t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
