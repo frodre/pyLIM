@@ -1,5 +1,3 @@
-__author__ = 'wperkins'
-
 import scipy.io.netcdf as ncf #should use netcdf library
 import tables as tb
 import numpy as np
@@ -72,17 +70,6 @@ class DataObject(object):
         self.is_detrended = False
 
 
-def unpack_netcdf_data(ncvar):
-    assert(type(ncvar) == ncf.netcdf_variable)
-
-    try:
-        data = ncvar.data*ncvar.scale_factor + ncvar.add_offset
-    except AttributeError:
-        data = ncvar.data
-
-    return data
-
-
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
     assert(type(h5file) == tb.File)
 
@@ -112,7 +99,7 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
     return out_arr
 
 
-def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
+def empty_hdf5_carray(h5file, group, node, in_atom, shape, kwargs):
     assert(type(h5file) == tb.File)
 
     try:
