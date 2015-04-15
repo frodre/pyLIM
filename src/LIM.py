@@ -1,3 +1,4 @@
+# coding=utf-8
 """
 Main Linear Inverse Model classes and methods.
 
