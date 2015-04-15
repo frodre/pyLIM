@@ -1,3 +1,9 @@
+"""
+Module for data interaction tools for the LIM package.
+
+Author: Andre Perkins
+"""
+
 import tables as tb
 import numpy as np
 

@@ -1,3 +1,9 @@
+"""
+Various utility tools for the LIM package.
+
+Author: Andre Perkins
+"""
+
 import tables as tb
 import numpy as np
 import matplotlib.pyplot as plt

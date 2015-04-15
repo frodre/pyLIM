@@ -1,4 +1,8 @@
-#-*- coding: utf-8 -*-
+"""
+Main Linear Inverse Model classes and methods.
+
+Author: Andre Perkins
+"""
 
 from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16, copy
 from numpy import linspace, unique, concatenate, copy
