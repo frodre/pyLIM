@@ -1,7 +1,5 @@
-import scipy.io.netcdf as ncf #should use netcdf library
 import tables as tb
 import numpy as np
-from Stats import calc_anomaly
 
 
 class DataObject(object):

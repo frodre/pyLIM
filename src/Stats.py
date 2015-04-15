@@ -6,7 +6,7 @@ the first dimension is the temporal sampling dimension.
 
 import numpy as np
 import numexpr as ne
-from math import ceil, floor
+from math import ceil
 from scipy.sparse.linalg import svds
 
 

@@ -1,7 +1,6 @@
 import tables as tb
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.io.netcdf as ncf
 import matplotlib.cm as cm
 from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap

@@ -1,7 +1,8 @@
 import LIM
 import numpy as np
 import tables as tb
-import scipy.io.netcdf as ncf
+import netCDF4 as ncf
+import DataTools as Dt
 import os
 
 # if os.name == 'nt':
@@ -18,28 +19,26 @@ import os
 if os.name == 'nt':
     f = ncf.netcdf_file('G:/Hakim Research/data/20CR/air.2m.mon.mean.nc', 'r')
 else:
-    f = ncf.netcdf_file('/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc', 'r')
+    #f = ncf.netcdf_file('/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc', 'r')
+    #f = ncf.Dataset('/home/chaos2/wperkins/data/Berkeley/b_earth_landocean_1900_2015.nc', 'r')
+    f = ncf.Dataset('/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc', 'r')
+    outf = '/home/chaos2/wperkins/data/pyLIM/CCSM4_Resample.h5'
 
-tvar = f.variables['air']
-lats = f.variables['lat'].data
-lons = f.variables['lon'].data
+obs = f.variables['tas'][:]
+lats = f.variables['lat'][:]
+lons = f.variables['lon'][:]
+#lats = np.linspace(-89.5, 89.5, 180)
+#lons = np.linspace(0, 359.5, 360)
 lats, lons = np.meshgrid(lats, lons, indexing='ij')
 
-#account for data storage as int * scale + offset
-try:
-    sf = tvar.scale_factor
-    offset = tvar.add_offset
-    obs = tvar.data*sf + offset
-except AttributeError:
-    obs = tvar.data
     
 #flatten t-data
 spatial_shp = obs.shape[1:]
 obs = obs.reshape((obs.shape[0], np.product(spatial_shp)))
-
+obs = Dt.DataObject(obs)
 yr = 12
-test_dat = obs[0:yr*16]
-train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
+#test_dat = obs[0:yr*16]
+#train_data = np.concatenate((obs[0:yr], obs[yr*15:]), axis=0)
 #sample_tdim = len(train_data) - 9*yr
 #train_data = train_data[0:sample_tdim]  #Calibration dataset
 
@@ -95,13 +94,13 @@ lons = lons.flatten()
 #     h5f3.close()
 
 try:
-    ftimes = range(1, 10)  # 1 - 9 yr forecasts
+    ftimes = range(0, 2)  # 1 - 9 yr forecasts
     neigs = 20  # num PCs for EOFs
-    hold_frac = 0.1  # fraction of data to withold for resample tests
-    numTrials = 140
-    h5f = tb.open_file('trials_1yr.h5', 'w')
+    hold_frac = 0.05  # fraction of data to withold for resample tests
+    numTrials = 30
+    h5f = tb.open_file(outf, 'w')
 
-    resample = LIM.ResampleLIM(obs, yr, [1], neigs, hold_frac, numTrials,
+    resample = LIM.ResampleLIM(obs, yr, ftimes, neigs, hold_frac, numTrials,
                                area_wgt_lats=lats,
                                lons=lons,
                                h5file=h5f)
