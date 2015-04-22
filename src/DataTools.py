@@ -8,7 +8,7 @@ import tables as tb
 import numpy as np
 
 
-class DataObject(object):
+class BaseDataObject(object):
     """Data Input Object
 
     This class is for handling data which may be in a masked format. This
@@ -25,7 +25,7 @@ class DataObject(object):
     Also might incorporate IRIS DataCubes to store data in the future.
     """
 
-    def __init__(self, data, valid_data=None):
+    def __init__(self, data, lat=None, lon=None, valid_data=None):
         """
         Construction of a DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -35,23 +35,24 @@ class DataObject(object):
         ----------
         data: ndarray
             Input dataset to be used.
+        lat: tuple(ndarray, int)
+            latitude array and corresponding data dimension
+        lon: tuple(ndarray, int)
+            longitude array and corresponding data dimension
         valid_data: ndarray (np.bool), optional
             Masked array corresponding to input dataset or uncompressed
             version of the input dataset.  Should have spatial dimensions
             greater than or equal to the spatial dimensions of data.
         """
 
-        assert type(data) == np.ndarray
-        assert (data.ndim <= 3) and (data.ndim >= 1),\
-            'Expected ndim from 1 to 3'
+        assert data.ndim <= 3, 'Only data dimensions of 1 to 3 are allowed.'
 
         # Check to see if data input is a compressed version
         compressed = False
         if valid_data is not None:
             dim_lim = valid_data.ndim
 
-            # Right now built for 2D spatial data, might change in the future
-            assert dim_lim < 3,\
+            assert dim_lim <= 3,\
                 'valid_input should not have more than 2 dimensions.'
 
             # Check the dimensions of the mask and data to se if compressed
