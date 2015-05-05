@@ -4,7 +4,7 @@ import tables as tb
 import numpy as np
 import pytest
 import os
-from .. import DataTools as Dt
+from pylim import DataTools as Dt
 
 
 @pytest.fixture(scope='module')
@@ -75,10 +75,18 @@ def test_var_to_carray_node_already_exists(tb_file):
     data2 = np.arange(50, 100).reshape(shape)
 
     Dt.var_to_hdf5_carray(tb_file, '/', 'data', data1)
-    tb_file.flush()
     Dt.var_to_hdf5_carray(tb_file, '/', 'data', data2)
     assert tb_file.__contains__('/data')
     assert np.array_equal(tb_file.root.data[:], data2)
+
+
+if __name__ == '__main__':
+    try:
+        f = tb.open_file('test.h5', 'w')
+        test_var_to_carray_node_already_exists(f)
+    finally:
+        f.close()
+        os.system('rm -f test.h5')
 
 
 
