@@ -25,34 +25,25 @@ class BaseDataObject(object):
     Also might incorporate IRIS DataCubes to store data in the future.
     """
 
-    # Trying out use of static attributes
-    _TIME = 'time'
-    _LEVEL = 'level'
-    _LAT = 'lat'
-    _LON = 'lon'
-
-    @property
-    def time(self):
-        return type(self)._TIME
-
-    @property
-    def level(self):
-        return type(self)._LEVEL
-
-    @property
-    def lat(self):
-        return type(self)._LAT
-
-    @property
-    def lon(self):
-        return type(self)._LON
+    # Static names
+    TIME = 'time'
+    LEVEL = 'level'
+    LAT = 'lat'
+    LON = 'lon'
 
     @staticmethod
     def _match_dims(shape, dim_coords):
-        return {key: shape.index(len(value)) for key, value in dim_coords.items()}
+        return {key: value[0] for key, value in dim_coords.items()
+                if shape[value[0]] == len(value[1])}
 
+    @staticmethod
+    def _new_databin(data):
+        new = np.empty_like(data)
+        new[:] = data
+        return new
 
-    def __init__(self, data, dim_coords=None, mask=None):
+    def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
+                 is_anomaly=False, is_run_mean=False, is_detrended=False):
         """
         Construction of a DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -76,83 +67,108 @@ class BaseDataObject(object):
         self._full_shp = data.shape
 
         # Match dimension coordinate vectors
-        if self._TIME in dim_coords:
-            assert data.shape[0] == len(dim_coords[self._TIME]), \
-                'Temporal dimension must be the leading dimension.'
-            self._leading_time = True
-            self._spatial_shp = data.shape[1:]
+        if dim_coords is not None:
+            if self.TIME in dim_coords.keys():
+                # Assert leading dimension is sampling dimension
+                assert dim_coords[self.TIME][0] == 0
+                self._leading_time = True
+                self._time_shp = data.shape[0]
+                self._spatial_shp = data.shape[1:]
+            else:
+                self._leading_time = False
+                self._spatial_shp = self._full_shp
+            self._dim_idx = self._match_dims(data.shape, dim_coords)
         else:
             self._leading_time = False
             self._spatial_shp = self._full_shp
+            self._dim_dix = None
 
-        try:
-            self._dim_idx = self._match_dims(data, dim_coords)
-        except ValueError as e:
-            # Could not fit spatial dimensions, no regridding
-            self._dim_idx = None
-
+        self._flat_spatial_shp = np.product(self._spatial_shp)
 
         # Check to see if data input is a compressed version
+        self.is_masked = False
         compressed = False
-        if mask is not None:
-            dim_lim = mask.ndim
+        if valid_data is not None:
+            dim_lim = valid_data.ndim
 
             assert dim_lim <= 3,\
-                'valid_input should not have more than 2 dimensions.'
+                'mask should not have more than 3 dimensions.'
+            assert dim_lim == len(self._spatial_shp),\
+                'mask should have same number of spatial dimensions as data'
 
             # Check the dimensions of the mask and data to se if compressed
-            for dat_dim, mask_dim in zip(data.shape[::-1][:dim_lim],
-                                         mask.shape[::-1][:dim_lim]):
+            for dat_dim, mask_dim in zip(self._spatial_shp, valid_data.shape):
                 assert dat_dim <= mask_dim,\
                     'Valid data array provided should have larger ' +\
                     'spatial dimension than the masked input data.'
-                if dat_dim < mask_dim:
-                    compressed |= True
+                compressed |= dat_dim < mask_dim
 
             # Apply input mask if its spatial dimensions match data
             if not compressed:
-                full_valid = np.ones(data.shape, dtype=np.bool) * mask
+                full_valid = np.ones(data.shape, dtype=np.bool) * valid_data
                 data[~full_valid] = np.nan
-        else:
-            compressed = False
+            else:
+                self._full_shp = valid_data.shape
 
-        # Create full grid from compressed data if compressed
-        if compressed:
-            self.data = data
-            full_shp = list(data.shape[:(data.ndim-dim_lim)]) + list(mask.shape)
-            full_valid = np.ones(full_shp, dtype=np.bool) * mask
-            self.full_data = np.empty(full_shp)*np.nan
-            self.full_data[full_valid] = self.data
-            self.full_shp = self.full_data.shape
-            self.have_data = mask
+            self.valid_data = valid_data.flatten()
             self.is_masked = True
         else:
-            self.full_data = data
-            self.full_shp = data.shape
-
-            # Flatten spatial dimension
-            if data.ndim == 3:
-                new_shp = (self.full_shp[0], self.full_shp[1]*self.full_shp[2])
-                self.full_data = self.full_data.reshape(new_shp)
-
-            # Create mask if data contains non-finite elements (nans, infs)
+            # Check to see if non-finite data requires use of mask
             if not np.alltrue(np.isfinite(data)):
+                if self._leading_time:
+                    valid_data = np.isfinite(data[0])
+                    for time in data:
+                        valid_data &= np.isfinite(time)
+                    full_valid = np.ones(data.shape, dtype=np.bool) * valid_data
+                    data[~full_valid] = np.nan
+                else:
+                    valid_data = np.isfinite(data)
+
                 self.is_masked = True
-                self.have_data = np.isfinite(self.full_data[0])
+                self.valid_data = valid_data.flatten()
 
-                #Find locations we have data for at all times
-                for time in self.full_data:
-                    self.have_data &= np.isfinite(time)
+        self.orig_data = self._new_databin(data)
+        self.data = self.orig_data
 
-                self.data = self.full_data[:, self.have_data]
+        # Flatten Spatial Dimension if applicable
+        if force_flat or self.is_masked:
+            if self._leading_time:
+                self.data = data.reshape(self._time_shp, self._flat_spatial_shp)
             else:
-                self.is_masked = False
-                self.data = self.full_data
+                self.data = data.reshape(self._flat_spatial_shp)
+
+        # Compress the data if mask is present
+        if compressed:
+            self.compressed_data = self.orig_data
+            self.is_compressed = True
+        elif self.is_masked:
+            if self._leading_time:
+                self.compressed_data = self._new_databin(self.data[:, self.valid_data])
+            else:
+                self.compressed_data = self._new_databin(self.data[self.valid_data])
+            self.is_compressed = True
+        else:
+            self.compressed_data = None
+            self.is_compressed = False
 
         # Future possible data manipulation functionality
-        self.is_anomaly = False
-        self.is_runmean = False
-        self.is_detrended = False
+        self.is_anomaly = is_anomaly
+        self.is_run_mean = is_run_mean
+        self.is_detrended = is_detrended
+
+    def inflate_full_grid(self, data=None):
+        assert self.is_compressed, 'Can only inflate compressed data.'
+
+        if data is None:
+            data = self.data
+
+        full = np.empty(self._full_shp) * np.nan
+        if self._leading_time:
+            full[:, self.valid_data] = data
+        else:
+            full[self.valid_data] = data
+
+        return full
 
 
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
