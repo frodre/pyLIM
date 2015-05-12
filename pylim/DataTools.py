@@ -70,20 +70,23 @@ class BaseDataObject(object):
         if dim_coords is not None:
             if self.TIME in dim_coords.keys():
                 # Assert leading dimension is sampling dimension
-                assert dim_coords[self.TIME][0] == 0
+                assert dim_coords[self.TIME][0] == 0, 'Sampling dimension must'\
+                    ' always be the leading dimension if provided.'
                 self._leading_time = True
-                self._time_shp = data.shape[0]
+                self._time_shp = [data.shape[0]]
                 self._spatial_shp = data.shape[1:]
             else:
                 self._leading_time = False
+                self._time_shp = []
                 self._spatial_shp = self._full_shp
             self._dim_idx = self._match_dims(data.shape, dim_coords)
         else:
             self._leading_time = False
+            self._time_shp = []
             self._spatial_shp = self._full_shp
             self._dim_dix = None
 
-        self._flat_spatial_shp = np.product(self._spatial_shp)
+        self._flat_spatial_shp = [np.product(self._spatial_shp)]
 
         # Check to see if data input is a compressed version
         self.is_masked = False
@@ -105,10 +108,14 @@ class BaseDataObject(object):
 
             # Apply input mask if its spatial dimensions match data
             if not compressed:
+                # multplication broadcasts across leading sampling dimension if
+                # applicable
                 full_valid = np.ones(data.shape, dtype=np.bool) * valid_data
                 data[~full_valid] = np.nan
             else:
-                self._full_shp = valid_data.shape
+                assert np.all(np.isfinite(data)),\
+                    'Previously compressed data should not contain NaN data.'
+                self._full_shp = self._time_shp + list(valid_data.shape)
 
             self.valid_data = valid_data.flatten()
             self.is_masked = True
@@ -133,40 +140,43 @@ class BaseDataObject(object):
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
             if self._leading_time:
-                self.data = data.reshape(self._time_shp, self._flat_spatial_shp)
+                self.data = data.reshape(self._time_shp + self._flat_spatial_shp)
             else:
                 self.data = data.reshape(self._flat_spatial_shp)
 
         # Compress the data if mask is present
-        if compressed:
-            self.compressed_data = self.orig_data
-            self.is_compressed = True
-        elif self.is_masked:
-            if self._leading_time:
-                self.compressed_data = self._new_databin(self.data[:, self.valid_data])
-            else:
-                self.compressed_data = self._new_databin(self.data[self.valid_data])
-            self.is_compressed = True
+        if compressed or self.is_masked:
+            if compressed:
+                self.compressed_data = self.orig_data
+            elif self.is_masked:
+                if self._leading_time:
+                    self.compressed_data = self._new_databin(self.data[:, self.valid_data])
+                else:
+                    self.compressed_data = self._new_databin(self.data[self.valid_data])
+            self.data = self.compressed_data
         else:
             self.compressed_data = None
-            self.is_compressed = False
 
         # Future possible data manipulation functionality
         self.is_anomaly = is_anomaly
         self.is_run_mean = is_run_mean
         self.is_detrended = is_detrended
 
-    def inflate_full_grid(self, data=None):
-        assert self.is_compressed, 'Can only inflate compressed data.'
+    def inflate_full_grid(self, data=None, reshape_orig=False):
+        assert self.is_masked, 'Can only inflate compressed data.'
 
         if data is None:
             data = self.data
 
-        full = np.empty(self._full_shp) * np.nan
+        shp = self._time_shp + list(self.valid_data.shape)
+        full = np.empty(shp) * np.nan
         if self._leading_time:
             full[:, self.valid_data] = data
         else:
             full[self.valid_data] = data
+
+        if reshape_orig:
+            return full.reshape(self._full_shp)
 
         return full
 
