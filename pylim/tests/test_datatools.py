@@ -6,7 +6,7 @@ import pytest
 import os
 from pylim import DataTools as Dt
 from pylim.DataTools import BaseDataObject as BDO
-from pylim.DataTools import BaseDataObject as BO
+from pylim.DataTools import Hdf5DataObject as HDO
 
 
 @pytest.fixture(scope='module')
@@ -21,10 +21,46 @@ def tb_file(request):
     request.addfinalizer(fin)
     return tbf
 
-@pytest.fixture(scope='module',
-                params=[BDO, BO])
-def dat_obj(request):
-    return request.param
+@pytest.fixture(params=['a', 'w'])
+def writeable_tb_file(request):
+    tbf = tb.open_file('test1.h5', request.param,
+                       filters=tb.Filters(complevel=0, complib='blosc'))
+
+    def fin():
+        tbf.close()
+        os.system('rm -f test1.h5')
+
+    request.addfinalizer(fin)
+    return tbf
+
+@pytest.fixture()
+def readonly_tb_file(request):
+    tbf = tb.open_file('test2.h5', 'r',
+                       filters=tb.Filters(complevel=0, complib='blosc'))
+
+    def fin():
+        tbf.close()
+        os.system('rm -f test2.h5')
+
+    request.addfinalizer(fin)
+    return tbf
+
+@pytest.fixture()
+def closed_tb_file(request):
+    tbf = tb.open_file('test3.h5', 'r',
+                       filters=tb.Filters(complevel=0, complib='blosc'))
+    tbf.close()
+
+    def fin():
+        os.system('rm -f test3.h5')
+
+    request.addfinalizer(fin)
+    return tbf
+
+@pytest.fixture()
+def hdf5_obj(tb_file):
+    dat = np.arange(10)
+    return HDO(dat, tb_file)
 
 
 
@@ -93,6 +129,9 @@ def test_var_to_carray_node_already_exists(tb_file):
 ## When no dimensions are provided 1D-3D data could have spatial and temporal
 ## components.  Should do not change shape or data.  4D data we do not know
 ## the time dimension so it should also be left alone by default.
+
+
+### BaseDataObject ####
 @pytest.mark.parametrize("shape",
     [(24),
     ((4, 6)),
@@ -100,28 +139,28 @@ def test_var_to_carray_node_already_exists(tb_file):
     ((2, 2, 3, 2)),
     pytest.mark.xfail(((1, 2, 2, 3, 2))),
     ])
-def test_basedataobj_data_nodim(shape, dat_obj):
+def test_basedataobj_data_nodim(shape):
     data = np.arange(np.product(np.array(shape))).reshape(shape)
-    obj = dat_obj(data)
+    obj = BDO(data)
     assert np.array_equal(obj.data, data)
     assert obj.data.shape == data.shape
     assert obj._full_shp == data.shape
 
 
-def test_basedataobj_data_force_flat(dat_obj):
+def test_basedataobj_data_force_flat():
     data = np.arange(20).reshape(2, 2, 5)
-    obj = dat_obj(data, force_flat=True)
+    obj = BDO(data, force_flat=True)
     assert np.array_equal(data.flatten(), obj.data[:])
     assert obj.data.shape == data.flatten().shape
 
 
-def test_baseddataobj_dim_matching(dat_obj):
+def test_basedataobj_dim_matching():
     data = np.arange(24).reshape(2, 2, 3, 2)
-    coords = {dat_obj.TIME: (0, [1, 2]),
-              dat_obj.LEVEL: (1, [1000, 900]),
-              dat_obj.LAT: (2, [45, 50, 55]),
-              dat_obj.LON: (3, [-80, -90])}
-    obj = dat_obj(data, dim_coords=coords)
+    coords = {BDO.TIME: (0, [1, 2]),
+              BDO.LEVEL: (1, [1000, 900]),
+              BDO.LAT: (2, [45, 50, 55]),
+              BDO.LON: (3, [-80, -90])}
+    obj = BDO(data, dim_coords=coords)
     assert obj._leading_time
     assert obj._dim_idx == {key: value[0] for key, value in coords.items()}
     assert data.shape[0] == obj._time_shp[0]
@@ -129,41 +168,41 @@ def test_baseddataobj_dim_matching(dat_obj):
     assert data.shape == obj.data.shape
 
 @pytest.mark.xfail
-def test_baseddataobj_dim_noleadsample(dat_obj):
+def test_basedataobj_dim_noleadsample():
     data = np.arange(24).reshape(2, 2, 3, 2)
-    coords = {dat_obj.TIME: (2, [1, 2, 3]),
-              dat_obj.LEVEL: (1, [1000, 900]),
-              dat_obj.LAT: (0, [50, 55]),
-              dat_obj.LON: (3, [-80, -90])}
-    obj = dat_obj(data, dim_coords=coords)
+    coords = {BDO.TIME: (2, [1, 2, 3]),
+              BDO.LEVEL: (1, [1000, 900]),
+              BDO.LAT: (0, [50, 55]),
+              BDO.LON: (3, [-80, -90])}
+    obj = BDO(data, dim_coords=coords)
 
 
-def test_baseddataobj_dim_mismatched(dat_obj):
+def test_basedataobj_dim_mismatched():
     data = np.arange(24).reshape(2, 2, 3, 2)
-    coords = {dat_obj.TIME: (0, [1, 2]),
-              dat_obj.LEVEL: (1, [1000, 900, 800]),
-              dat_obj.LAT: (2, [45, 50, 55]),
-              dat_obj.LON: (3, [-80, -90, 100])}
-    obj = dat_obj(data, dim_coords=coords)
+    coords = {BDO.TIME: (0, [1, 2]),
+              BDO.LEVEL: (1, [1000, 900, 800]),
+              BDO.LAT: (2, [45, 50, 55]),
+              BDO.LON: (3, [-80, -90, 100])}
+    obj = BDO(data, dim_coords=coords)
     assert len(obj._dim_idx.keys()) == 2
-    assert dat_obj.TIME in obj._dim_idx
-    assert dat_obj.LAT in obj._dim_idx
+    assert BDO.TIME in obj._dim_idx
+    assert BDO.LAT in obj._dim_idx
 
 
-def test_baseddataobj_dim_notime(dat_obj):
+def test_basedataobj_dim_notime():
     data = np.arange(24).reshape(2, 2, 3, 2)
-    coords = {dat_obj.LEVEL: (1, [1000, 900]),
-              dat_obj.LAT: (2, [45, 50, 55]),
-              dat_obj.LON: (3, [-80, -90])}
-    obj = dat_obj(data, dim_coords=coords)
+    coords = {BDO.LEVEL: (1, [1000, 900]),
+              BDO.LAT: (2, [45, 50, 55]),
+              BDO.LON: (3, [-80, -90])}
+    obj = BDO(data, dim_coords=coords)
     assert len(obj._dim_idx.keys()) == 3
     assert obj._full_shp == data.shape
 
 
-def test_baseddataobj_nanentry_noleadtime(dat_obj):
+def test_basedataobj_nanentry_noleadtime():
     data = np.arange(24).reshape(3, 4, 2).astype(np.float32)
     data[2, 3, 1] = np.nan
-    obj = dat_obj(data)
+    obj = BDO(data)
     assert obj.is_masked
     np.testing.assert_array_equal(data, obj.orig_data)
     assert np.array_equal(data.flatten()[:-1], obj.compressed_data)
@@ -173,18 +212,18 @@ def test_baseddataobj_nanentry_noleadtime(dat_obj):
                                   err_msg='Inflation to full grid failed.')
 
 
-def test_baseddataobj_nanentry_leadtime(dat_obj):
+def test_basedataobj_nanentry_leadtime():
     data = np.arange(24).reshape(3, 2, 2, 2).astype(np.float32)
     data[1, 0, 0, 1] = np.nan
     data[2, 1, 1, 1] = np.nan
-    dim = {dat_obj.TIME: (0, [1, 2, 3])}
+    dim = {BDO.TIME: (0, [1, 2, 3])}
 
     valid = np.isfinite(data[0])
     for time in data:
         valid &= np.isfinite(time)
     full_valid = np.ones_like(data, dtype=np.bool) * valid
 
-    obj = dat_obj(data, dim_coords=dim)
+    obj = BDO(data, dim_coords=dim)
     assert obj._leading_time
     assert obj.is_masked
     assert obj.data.size == 18  # remove entire nan loc from entire sample
@@ -195,14 +234,14 @@ def test_baseddataobj_nanentry_leadtime(dat_obj):
                                   obj.inflate_full_grid(reshape_orig=True))
 
 
-def test_basedataobj_compressed_noleadtime(dat_obj):
+def test_basedataobj_compressed_noleadtime():
     data = np.arange(24).reshape(3, 4, 2).astype(np.float32)
     data[2, 3, 1] = np.nan
     data[1, 0, 1] = np.nan
     valid = np.isfinite(data)
     comp = data[valid]
     valid = valid.flatten()
-    obj = dat_obj(comp, valid_data=valid)
+    obj = BDO(comp, valid_data=valid)
 
     assert obj.is_masked
     assert obj.data.shape == comp.shape
@@ -210,11 +249,11 @@ def test_basedataobj_compressed_noleadtime(dat_obj):
     np.testing.assert_array_equal(data.flatten(),
                                   obj.inflate_full_grid())
 
-def test_basedataobj_compressed_leadtime(dat_obj):
+def test_basedataobj_compressed_leadtime():
     data = np.arange(24).reshape(3, 4, 2).astype(np.float32)
     data[2, 3, 1] = np.nan
     data[1, 0, 1] = np.nan
-    dim = {dat_obj.TIME: (0, [1, 2, 3])}
+    dim = {BDO.TIME: (0, [1, 2, 3])}
 
     valid = np.isfinite(data[0])
     for time in data:
@@ -224,23 +263,99 @@ def test_basedataobj_compressed_leadtime(dat_obj):
     inflated = np.copy(data).reshape(3,8)
     inflated[:, ~valid.flatten()] = np.nan
 
-    obj = dat_obj(comp, dim_coords=dim, valid_data=valid.flatten())
+    obj = BDO(comp, dim_coords=dim, valid_data=valid.flatten())
     assert obj._leading_time
     assert obj.is_masked
     np.testing.assert_array_equal(obj.inflate_full_grid(), inflated)
 
 
+### Hdf5DataObject ####
+@pytest.mark.xfail
+def test_hdf5dataobj_noh5file():
+    data = np.arange(10)
+    obj = HDO(data, 'Hello')
+
+@pytest.mark.xfail
+def test_hdf5dataobj_readonly(readonly_tb_file):
+    data = np.arange(10)
+    obj = HDO(data, readonly_tb_file)
+
+@pytest.mark.xfail
+def test_hdf5dataobj_closed_file(closed_tb_file):
+    data = np.arange(10)
+    obj = HDO(data, closed_tb_file)
+
+def test_hdf5dataobj_setgroup_string_nopre_xist(tb_file):
+    data = np.arange(10)
+    obj = HDO(data, tb_file, default_grp='/lol')
+    grp = tb_file.get_node('/lol')
+    assert obj._default_grp == grp
+
+def test_hdf5dataobj_setgroup_group_nopre_xist(tb_file, hdf5_obj):
+    grp = tb_file.create_group(tb_file.root, 'wut')
+    hdf5_obj.set_databin_grp(grp)
+    assert hdf5_obj._default_grp == grp
+
+def test_hdf5dataobj_setgroup_string_pre_xist(tb_file, hdf5_obj):
+    hdf5_obj.set_databin_grp('/lol')
+    assert hdf5_obj._default_grp == tb_file.get_node('/lol')
+
+def test_hdf5dataobj_setgroup_group_pre_xist(tb_file, hdf5_obj):
+    grp = tb_file.get_node('/wut')
+    hdf5_obj.set_databin_grp(grp)
+    assert hdf5_obj._default_grp == grp
+
+def test_hdf5dataobj_setgroup_samename_notgrouptypenode(tb_file, hdf5_obj):
+    carray = Dt.var_to_hdf5_carray(tb_file, '/wut', 'rofl', np.arange(10))
+    hdf5_obj.set_databin_grp('/wut/rofl')
+    grp = tb_file.get_node('/wut/rofl')
+    assert carray != hdf5_obj._default_grp
+    assert hdf5_obj._default_grp == grp
+    assert type(hdf5_obj._default_grp) == tb.Group
+
+@pytest.mark.xfail
+def test_hdf5dataobj_setgroup_samename_notgrouptypenode(tb_file, hdf5_obj):
+    carray = Dt.var_to_hdf5_carray(tb_file, '/lol', 'rofl', np.arange(10))
+    hdf5_obj.set_databin_grp(carray)
+
+
+@pytest.mark.parametrize("shape",
+    [(24),
+    ((4, 6)),
+    ((4, 3, 2)),
+    ((2, 2, 3, 2)),
+    pytest.mark.xfail(((1, 2, 2, 3, 2))),
+    ])
+def test_hdf5dataobj_data_nodim(shape, tb_file):
+    data = np.arange(np.product(np.array(shape))).reshape(shape)
+    obj = HDO(data, tb_file)
+    assert np.array_equal(obj.data, data)
+    assert obj.data.shape == data.shape
+    assert obj._full_shp == data.shape
+
+
+def test_hdf5dataobj_nanentry_noleadtime(tb_file):
+    data = np.arange(24).reshape(3, 4, 2).astype(np.float32)
+    data[2, 3, 1] = np.nan
+    obj = HDO(data, tb_file)
+    assert obj.is_masked
+    np.testing.assert_array_equal(data, obj.orig_data)
+    assert np.array_equal(data.flatten()[:-1], obj.compressed_data)
+    assert np.array_equal(data.flatten()[:-1], obj.data)
+    np.testing.assert_array_equal(data,
+                                  obj.inflate_full_grid(reshape_orig=True),
+                                  err_msg='Inflation to full grid failed.')
 
 
 
 if __name__ == '__main__':
-    # try:
-    #     f = tb.open_file('test.h5', 'w')
-    #     test_var_to_carray_node_already_exists(f)
-    # finally:
-    #     f.close()
-    #     os.system('rm -f test.h5')
-    test_basedataobj_compressed_leadtime()
+    try:
+        f = tb.open_file('test.h5', 'w')
+        test_hdf5dataobj_data_nodim((24), f)
+    finally:
+        f.close()
+        os.system('rm -f test.h5')
+    # test_basedataobj_compressed_leadtime()
 
 
 

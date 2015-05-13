@@ -6,6 +6,7 @@ Author: Andre Perkins
 
 import tables as tb
 import numpy as np
+import os.path as path
 
 
 class BaseDataObject(object):
@@ -36,12 +37,6 @@ class BaseDataObject(object):
         return {key: value[0] for key, value in dim_coords.items()
                 if shape[value[0]] == len(value[1])}
 
-    @staticmethod
-    def _new_databin(data):
-        new = np.empty_like(data)
-        new[:] = data
-        return new
-
     def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
                  is_anomaly=False, is_run_mean=False, is_detrended=False):
         """
@@ -57,14 +52,24 @@ class BaseDataObject(object):
             Coordinate vector dictionary for supplied data.  Please use
             DataObject attributes (e.g. DataObject.TIME) for dictionary
             keys.
-        mask: ndarray (np.bool), optional
-            Masked array corresponding to input dataset or uncompressed
-            version of the input dataset.  Should have spatial dimensions
+        valid_data: ndarray (np.bool), optional
+            Array corresponding to valid data in the of the input dataset
+            or uncompressed version of the input dataset.  Should have the same
+            number of dimensions as the data and each  dimension should be
             greater than or equal to the spatial dimensions of data.
+        force_flat: bool
+            Force spatial dimensions to be flattened (1D array)
+        is_anomaly: bool
+            Data is already in anomaly form.
+        is_run_mean: bool
+            Data has been smoothed with a running mean.
+        is_detrended: bool
+            Data has been detrended.
         """
 
         assert data.ndim <= 4, 'Maximum of 4 dimensions are allowed.'
         self._full_shp = data.shape
+        self._data_bins = {}
 
         # Match dimension coordinate vectors
         if dim_coords is not None:
@@ -134,13 +139,14 @@ class BaseDataObject(object):
                 self.is_masked = True
                 self.valid_data = valid_data.flatten()
 
-        self.orig_data = self._new_databin(data)
+        self.orig_data = self._new_databin(data, 'orig')
         self.data = self.orig_data
 
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
             if self._leading_time:
-                self.data = data.reshape(self._time_shp + self._flat_spatial_shp)
+                self.data = data.reshape(self._time_shp +
+                                         self._flat_spatial_shp)
             else:
                 self.data = data.reshape(self._flat_spatial_shp)
 
@@ -150,9 +156,13 @@ class BaseDataObject(object):
                 self.compressed_data = self.orig_data
             elif self.is_masked:
                 if self._leading_time:
-                    self.compressed_data = self._new_databin(self.data[:, self.valid_data])
+                    self.compressed_data = self._new_databin(
+                        self.data[:, self.valid_data],
+                        'compressed')
                 else:
-                    self.compressed_data = self._new_databin(self.data[self.valid_data])
+                    self.compressed_data = self._new_databin(
+                        self.data[self.valid_data],
+                        'compressed')
             self.data = self.compressed_data
         else:
             self.compressed_data = None
@@ -162,7 +172,31 @@ class BaseDataObject(object):
         self.is_run_mean = is_run_mean
         self.is_detrended = is_detrended
 
+    # Create data backend container
+    def _new_databin(self, data, name):
+        new = np.empty_like(data)
+        new[:] = data
+        self._data_bins[name] = new
+        return new
+
     def inflate_full_grid(self, data=None, reshape_orig=False):
+        """
+        Returns previously compressed data to its full grid filled with np.NaN
+        values.
+
+        Parameters
+        ----------
+        data: ndarray like, optional
+            Data to inflate to its original grid size.
+        reshape_orig: bool, optional
+            If true use self._full_shp (shape of data used to initialize the
+            DataObject) to reshape the inflated grid output
+
+        Returns
+        -------
+        ndarray
+            Full decompressed grid filled with NaN values in masked locations.
+        """
         assert self.is_masked, 'Can only inflate compressed data.'
 
         if data is None:
@@ -179,6 +213,111 @@ class BaseDataObject(object):
             return full.reshape(self._full_shp)
 
         return full
+
+
+class Hdf5DataObject(BaseDataObject):
+
+    def __init__(self, data, h5file, dim_coords=None, valid_data=None,
+                 force_flat=False, is_anomaly=False, is_run_mean=False,
+                 is_detrended=False, default_grp='/data'):
+        """
+        Construction of a Hdf5DataObject from input data.  If nan or
+        infinite values are present, a compressed version of the data
+        is also stored.
+
+        Parameters
+        ----------
+        data: ndarray
+            Input dataset to be used.
+        h5file: tables.File
+            HDF5 Pytables file to use as a data storage backend
+        dim_coords: dict(str:ndarray), optional
+            Coordinate vector dictionary for supplied data.  Please use
+            DataObject attributes (e.g. DataObject.TIME) for dictionary
+            keys.
+        valid_data: ndarray (np.bool), optional
+            Array corresponding to valid data in the of the input dataset
+            or uncompressed version of the input dataset.  Should have the same
+            number of dimensions as the data and each  dimension should be
+            greater than or equal to the spatial dimensions of data.
+        force_flat: bool
+            Force spatial dimensions to be flattened (1D array)
+        is_anomaly: bool
+            Data is already in anomaly form.
+        is_run_mean: bool
+            Data has been smoothed with a running mean.
+        is_detrended: bool
+            Data has been detrended.
+        default_grp: tables.Group or str, optional
+            Group to store all created databins under in the hdf5 file.
+
+        Notes
+        -----
+        If NaN values are present I do not suggest
+        using the orig_data variable when reloading from a file.  Currently
+        PyTables Carrays have no method of storing np.NaN so the values in those
+        locations will be random.  Please only read the compressed data or make
+        sure you apply the mask on the data if you think self.orig_data is being
+        read from disk.
+        """
+
+        assert type(h5file) == tb.File,\
+            'Hdf5DataObject only works with PyTables.File types'
+        assert h5file.mode in ['a', 'w'], \
+            'h5file is not write enabled'
+        assert h5file.isopen,\
+            'h5file is closed and therefore not write enabled'
+
+        self.h5f = h5file
+        self._default_grp = None
+        self.set_databin_grp(default_grp)
+
+        super(Hdf5DataObject, self).__init__(data,
+                                             dim_coords=dim_coords,
+                                             valid_data=valid_data,
+                                             force_flat=force_flat,
+                                             is_anomaly=is_anomaly,
+                                             is_run_mean=is_run_mean,
+                                             is_detrended=is_detrended)
+
+    # Create backend data container
+    def _new_databin(self, data, name):
+        new = var_to_hdf5_carray(self.h5f,
+                                 self._default_grp,
+                                 name,
+                                 data)
+        self._data_bins[name] = new
+        return new
+
+    def set_databin_grp(self, group):
+        """
+        Set the default PyTables group for databins to be created under in the
+        HDF5 File.  This overwrites existing nodes with the same name and will
+        create the full path necessary to reach the desired node.
+
+        Parameters
+        ----------
+        group: tables.Group or str
+            A PyTables group object or string path to set as the default group
+            for the HDF5 backend to store databins.
+        """
+        assert type(group) == tb.Group or type(group) == str, \
+            'default_grp must be of type tb.Group or a path string'
+        try:
+            self._default_grp = self.h5f.get_node(group)
+            try:
+                assert type(self._default_grp) == tb.Group
+            except AssertionError:
+                self.h5f.remove_node(self._default_grp)
+                raise tb.NoSuchNodeError
+        except tb.NoSuchNodeError:
+            if type(group) == tb.Group:
+                grp_path = path.split(group._v_pathname)
+            else:
+                grp_path = path.split(group)
+
+            self._default_grp = self.h5f.create_group(grp_path[0], grp_path[1],
+                                                      createparents=True)
 
 
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
