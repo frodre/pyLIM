@@ -249,6 +249,7 @@ def test_basedataobj_compressed_noleadtime():
     np.testing.assert_array_equal(data.flatten(),
                                   obj.inflate_full_grid())
 
+
 def test_basedataobj_compressed_leadtime():
     data = np.arange(24).reshape(3, 4, 2).astype(np.float32)
     data[2, 3, 1] = np.nan
@@ -269,21 +270,105 @@ def test_basedataobj_compressed_leadtime():
     np.testing.assert_array_equal(obj.inflate_full_grid(), inflated)
 
 
+@pytest.mark.xfail
+def test_basedataobj_grid_nomatch():
+    data = np.arange(24).reshape(4, 3, 2)
+    coords = {BDO.TIME: (0, [1, 2, 3, 4]),
+              BDO.LAT: (1, [45, 50, 55, 60]),
+              BDO.LON: (2, [-80, -90])}
+    obj = BDO(data, dim_coords=coords)
+    obj.get_coordinate_grids(BDO.LAT)
+
+
+def test_basedataobj_grid():
+    data = np.arange(24).reshape(4, 3, 2)
+    coords = {BDO.TIME: (0, [1, 2, 3, 4]),
+              BDO.LAT: (1, [45, 50, 55]),
+              BDO.LON: (2, [-80, -90])}
+    obj = BDO(data, dim_coords=coords)
+    tmp = obj.get_coordinate_grids([BDO.LAT, BDO.LON])
+    longrd, latgrd = np.meshgrid(coords[BDO.LON][1],
+                                 coords[BDO.LAT][1])
+    assert np.array_equal(tmp[BDO.LON], longrd)
+    assert np.array_equal(tmp[BDO.LAT], latgrd)
+
+
+def test_basedataobj_grid_flat():
+    data = np.arange(24).reshape(4, 3, 2)
+    coords = {BDO.TIME: (0, [1, 2, 3, 4]),
+              BDO.LAT: (1, [45, 50, 55]),
+              BDO.LON: (2, [-80, -90])}
+    obj = BDO(data, dim_coords=coords, force_flat=True)
+    tmp = obj.get_coordinate_grids([BDO.LAT, BDO.LON])
+    longrd, latgrd = np.meshgrid(coords[BDO.LON][1],
+                                 coords[BDO.LAT][1])
+    assert np.array_equal(tmp[BDO.LON], longrd.flatten())
+    assert np.array_equal(tmp[BDO.LAT], latgrd.flatten())
+
+
+def test_basedataobj_grid_masked_compressed():
+    data = np.arange(24).reshape(4, 3, 2).astype(np.float16)
+    data[2, 2, 1] = np.nan
+    data[1, 0, 1] = np.nan
+    coords = {BDO.TIME: (0, [1, 2, 3, 4]),
+              BDO.LAT: (1, [45, 50, 55]),
+              BDO.LON: (2, [-80, -90])}
+    obj = BDO(data, dim_coords=coords, force_flat=True)
+    tmp = obj.get_coordinate_grids([BDO.LAT, BDO.LON])
+    longrd, latgrd = np.meshgrid(coords[BDO.LON][1],
+                                 coords[BDO.LAT][1])
+
+    valid = np.isfinite(data[0])
+    for time in data:
+        valid &= np.isfinite(time)
+
+    assert np.array_equal(tmp[BDO.LON], longrd[valid].flatten())
+    assert np.array_equal(tmp[BDO.LAT], latgrd[valid].flatten())
+
+
+def test_basedataobj_grid_masked_full():
+    data = np.arange(24).reshape(4, 3, 2).astype(np.float16)
+    data[2, 2, 1] = np.nan
+    data[1, 0, 1] = np.nan
+    coords = {BDO.TIME: (0, [1, 2, 3, 4]),
+              BDO.LAT: (1, [45, 50, 55]),
+              BDO.LON: (2, [-80, -90])}
+    obj = BDO(data, dim_coords=coords, force_flat=True)
+    tmp = obj.get_coordinate_grids([BDO.LAT, BDO.LON], compressed=False)
+    longrd, latgrd = np.meshgrid(coords[BDO.LON][1],
+                                 coords[BDO.LAT][1])
+    longrd = longrd.astype(np.float16)
+    latgrd = latgrd.astype(np.float16)
+
+    valid = np.isfinite(data[0])
+    for time in data:
+        valid &= np.isfinite(time)
+
+    longrd[valid] = np.nan
+    latgrd[valid] = np.nan
+
+    np.testing.assert_array_equal(tmp[BDO.LON], longrd.flatten())
+    np.testing.assert_array_equal(tmp[BDO.LAT], latgrd.flatten())
+
+
 ### Hdf5DataObject ####
 @pytest.mark.xfail
 def test_hdf5dataobj_noh5file():
     data = np.arange(10)
     obj = HDO(data, 'Hello')
 
+
 @pytest.mark.xfail
 def test_hdf5dataobj_readonly(readonly_tb_file):
     data = np.arange(10)
     obj = HDO(data, readonly_tb_file)
 
+
 @pytest.mark.xfail
 def test_hdf5dataobj_closed_file(closed_tb_file):
     data = np.arange(10)
     obj = HDO(data, closed_tb_file)
+
 
 def test_hdf5dataobj_setgroup_string_nopre_xist(tb_file):
     data = np.arange(10)
@@ -291,19 +376,23 @@ def test_hdf5dataobj_setgroup_string_nopre_xist(tb_file):
     grp = tb_file.get_node('/lol')
     assert obj._default_grp == grp
 
+
 def test_hdf5dataobj_setgroup_group_nopre_xist(tb_file, hdf5_obj):
     grp = tb_file.create_group(tb_file.root, 'wut')
     hdf5_obj.set_databin_grp(grp)
     assert hdf5_obj._default_grp == grp
 
+
 def test_hdf5dataobj_setgroup_string_pre_xist(tb_file, hdf5_obj):
     hdf5_obj.set_databin_grp('/lol')
     assert hdf5_obj._default_grp == tb_file.get_node('/lol')
+
 
 def test_hdf5dataobj_setgroup_group_pre_xist(tb_file, hdf5_obj):
     grp = tb_file.get_node('/wut')
     hdf5_obj.set_databin_grp(grp)
     assert hdf5_obj._default_grp == grp
+
 
 def test_hdf5dataobj_setgroup_samename_notgrouptypenode(tb_file, hdf5_obj):
     carray = Dt.var_to_hdf5_carray(tb_file, '/wut', 'rofl', np.arange(10))
@@ -312,6 +401,7 @@ def test_hdf5dataobj_setgroup_samename_notgrouptypenode(tb_file, hdf5_obj):
     assert carray != hdf5_obj._default_grp
     assert hdf5_obj._default_grp == grp
     assert type(hdf5_obj._default_grp) == tb.Group
+
 
 @pytest.mark.xfail
 def test_hdf5dataobj_setgroup_samename_notgrouptypenode(tb_file, hdf5_obj):
@@ -345,7 +435,6 @@ def test_hdf5dataobj_nanentry_noleadtime(tb_file):
     np.testing.assert_array_equal(data,
                                   obj.inflate_full_grid(reshape_orig=True),
                                   err_msg='Inflation to full grid failed.')
-
 
 
 if __name__ == '__main__':

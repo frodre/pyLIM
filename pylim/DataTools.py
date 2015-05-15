@@ -8,6 +8,9 @@ import tables as tb
 import numpy as np
 import os.path as path
 
+from Stats import run_mean, calc_anomaly
+from scipy.signal import detrend
+
 
 class BaseDataObject(object):
     """Data Input Object
@@ -69,6 +72,7 @@ class BaseDataObject(object):
 
         assert data.ndim <= 4, 'Maximum of 4 dimensions are allowed.'
         self._full_shp = data.shape
+        self.forced_flat = force_flat
         self._data_bins = {}
 
         # Match dimension coordinate vectors
@@ -85,6 +89,8 @@ class BaseDataObject(object):
                 self._time_shp = []
                 self._spatial_shp = self._full_shp
             self._dim_idx = self._match_dims(data.shape, dim_coords)
+            self._dim_coords = {key: value[1] for key, value in
+                                dim_coords.items()}
         else:
             self._leading_time = False
             self._time_shp = []
@@ -168,8 +174,11 @@ class BaseDataObject(object):
             self.compressed_data = None
 
         # Future possible data manipulation functionality
+        self.anomaly = None
         self.is_anomaly = is_anomaly
+        self.running_mean = None
         self.is_run_mean = is_run_mean
+        self.detrended = None
         self.is_detrended = is_detrended
 
     # Create data backend container
@@ -213,6 +222,67 @@ class BaseDataObject(object):
             return full.reshape(self._full_shp)
 
         return full
+
+    def calc_running_mean(self, window_size, **kwargs):
+        assert self._leading_time, 'Can only perform running mean with a '\
+            'specified leading sampling dimension'
+        rmean, bedge, tedge = run_mean(self.data, window_size, **kwargs)
+        self.running_mean = self._new_databin(rmean, 'run_mean')
+        self.data = self.running_mean
+        self.is_run_mean = True
+        # Running mean smooths data, no longer an anomaly or detrended
+        self.is_anomaly = False
+        self.is_detrended = False
+        return self.running_mean, bedge, tedge
+
+    # TODO: Use provided time coordinates to determine year size
+    # TODO: Determine if climo needs to be tied to object
+    def calc_anomaly(self, yr_size):
+        assert self._leading_time, 'Can only perform anomaly calculation with '\
+            'a specified leading sampling dimension'
+        anomaly, climo = calc_anomaly(self.data, yr_size)
+        self.anomaly = self._new_databin(anomaly, 'anomaly')
+        self.data = self.anomaly
+        self.is_anomaly = True
+        return self.anomaly
+
+    def detrend_data(self):
+        assert self._leading_time, 'Can only perform anomaly calculation with '\
+            'a specified leading sampling dimension'
+        detrended = detrend(self.data[:], axis=0, type='linear')
+        self.detrended = self._new_databin(detrended, 'detrended')
+        self.is_detrended = True
+        self.data = self.detrended
+        return self.detrended
+
+    def get_coordinate_grids(self, keys, compressed=True):
+        grids = {}
+
+        for key in keys:
+            assert key in self._dim_idx.keys(), 'No matching dimension for key'\
+                '({}) was found in data shape'.format(key)
+
+            idx = self._dim_idx[key]
+            if self._leading_time:
+                idx -= 1
+            coords = self._dim_coords[key]
+            grid = np.copy(coords)
+            for dim, _ in enumerate(self._spatial_shp):
+                if dim != idx:
+                    grid = np.expand_dims(grid, dim)
+
+            grid = np.ones(self._spatial_shp) * grid
+            if self.is_masked or self.forced_flat:
+                grid = grid.flatten()
+
+                if self.is_masked and compressed:
+                    grid = grid[self.valid_data]
+                elif self.is_masked:
+                    grid[self.valid_data] = np.nan
+
+            grids[key] = grid
+
+        return grids
 
 
 class Hdf5DataObject(BaseDataObject):
@@ -347,7 +417,7 @@ def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
     assert(type(h5file) == tb.File)
 
     # Switch to string
-    if type(group) == tb.Group:
+    if type(group) != str:
         group = group._v_pathname
 
     # Join path for node existence check

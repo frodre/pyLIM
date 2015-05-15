@@ -42,8 +42,9 @@ def calc_anomaly(data, yrsize, climo=None):
     old_shp = data.shape
     new_shp = (old_shp[0]//yrsize, yrsize, old_shp[1])
 
+    # Use of data[:] should work for ndarray or ndarray-like
     if climo is None:
-        climo = data.reshape(new_shp).mean(axis=0)
+        climo = data[:].reshape(new_shp).mean(axis=0)
 
     anomaly = data.reshape(new_shp) - climo
     return anomaly.reshape(old_shp), climo
