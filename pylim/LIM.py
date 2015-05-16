@@ -11,6 +11,7 @@ from numpy.linalg import pinv
 from scipy.signal import detrend
 from math import ceil
 import tables as tb
+import os.path as path
 
 from Stats import calc_eofs, run_mean, calc_anomaly
 import DataTools as Dt
@@ -42,24 +43,23 @@ def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
     """
     Helper method for creating forecast groups in the hdf5 file.
     """
-    try:
-        out_fcast = [h5f.create_carray(dest,
-                                       'f{:d}'.format(lead),
-                                       atom=atom,
-                                       shape=shape,
-                                       createparents=True,
-                                       title='{:d} Year Forecast'.format(lead))
-                     for lead in fcast_times]
-    except tb.NodeError:
-        for lead in fcast_times:
-            h5f.remove_node('/'.join((dest, 'f{:d}'.format(lead))))
-        out_fcast = [h5f.create_carray(dest,
-                                       'f{:d}'.format(lead),
-                                       atom=atom,
-                                       shape=shape,
-                                       createparents=True,
-                                       title='{:d} Year Forecast'.format(lead))
-                     for lead in fcast_times]
+
+    out_fcast = []
+
+    # if not h5f.__contains__(dest):
+    #     grp, node = path.split(dest)
+    #     h5f.create_group(grp, node)
+
+    for lead in fcast_times:
+        out_fcast.append(
+            Dt.empty_hdf5_carray(h5f,
+                                 dest,
+                                 'f{:d}'.format(lead),
+                                 atom,
+                                 shape,
+                                 createparents=True,
+                                 title='{:d} Year Forecast'.format(lead)))
+
     return out_fcast
 
 
@@ -87,12 +87,12 @@ class LIM(object):
     ....
     """
     
-    def __init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
-                 area_wgt_lats=None, lons=None, h5file=None):
+    def __init__(self, calib_data_obj, wsize, fcast_times, fcast_num_pcs,
+                 h5file=None):
         """
         Parameters
         ----------
-        data_in: DataTools.DataInput
+        calib_data_object: DataTools.BaseDataObject or subclass
             Dataset for determining LIM forecast EOFs.  DataInput provids
             a 2D MxN matrix where M (rows) represent temporal samples and
             N(columns) represent spatial samples.  It handles data with
@@ -107,36 +107,54 @@ class LIM(object):
             be integer value "1" not 12 (if wsize=12).
         fcast_num_pcs: int
             Number of principal components to include in forecast calculations
-        area_wgt_lats: ndarray, Optional
-            Latitude vector pertaining to spatial dimension N.  If used area-
-            weighting will be performed for pricipal component calculations.
-        lons: ndarray, Optional
-            Longitude vector flattened to spatial dimension N.
         H5file: HDF5_Object, Optional
-            File object to store LIM output.  It will create a series of 
+            File object to store LIM output.  It will create a series of
             directories under the given group
         """
-        
-        self._calibration = data_in.data
+        assert isinstance(calib_data_obj, Dt.BaseDataObject), \
+            'calib_data_obj must be an instance of BaseDataObject or subclass.'
+
+        self._data_obj = calib_data_obj
+        self._calibration = None
         self._wsize = wsize
         self.fcast_times = array(fcast_times, dtype=int16)
         self._neigs = fcast_num_pcs
-        self._lats = area_wgt_lats
-        self._lons = lons
-        self._H5file = h5file
-        self._obs_use = None
-        self._anomaly_srs = None
-        self._run_mean = None
-        self.masked_input = data_in.is_masked
+        self._h5file = h5file
+        self._bedge = None
+        self._tedge = None
 
-        if self.masked_input:
-            self.spatial_valid = data_in.have_data
-            if self._lats is not None:
-                self._mask_lats = self._lats[data_in.have_data]
-            if self._lons is not None:
-                self._mask_lons = self._lons[data_in.have_data]
+        self.set_calibration()
+
+    def set_calibration(self, data_obj=None, detrend_data=False):
+        if data_obj is not None:
+            assert isinstance(data_obj, Dt.BaseDataObject), \
+                'data_obj must be an instance of BaseDataObject or'\
+                'its subclass.'
         else:
-            self.spatial_valid = None
+            data_obj = self._data_obj
+
+        assert data_obj.forced_flat or data_obj.is_masked, \
+            'data_obj expects flattened spatial dimension'
+        assert data_obj._leading_time, \
+            'data_obj expects a leading sampling dimension'
+
+        if not data_obj.is_run_mean:
+            _, self._bedge, self._tedge = data_obj.calc_running_mean(
+                self._wsize,  shave_yr=True)
+
+        if not data_obj.is_anomaly:
+            data_obj.calc_anomaly(self._wsize)
+
+        if not data_obj.is_area_weighted:
+            data_obj.area_weight_data()
+
+        if detrend_data and not data_obj.is_detrended:
+            data_obj.detrend_data()
+            self._calibration = data_obj.data
+        elif not detrend_data and data_obj.is_detrended:
+            self._calibration = data_obj.area_weighted
+        else:
+            self._calibration = data_obj.data
 
     def forecast(self, t0_data, use_lag1=True, detrend_data=False,
                  use_h5=True):
@@ -149,9 +167,9 @@ class LIM(object):
         
         Parameters
         ----------
-        t0_data: ndarray
-            MxN array to forecast from.  M is the sample dimension, while N is 
-            the spatial dimension.  1-window length chunk will be removed from
+        t0_data: DataTools.BaseDataObject or subclass
+            Data to forecast from.  Expects leading sample dimension with a
+            flattened spatial dimension.  1-window length chunk is removed from
             each edge from the anomaly calculation procedure.  M^ = M - 2*wsize
         use_lag1: bool
             Flag for using only the G_1-matrix for forecasting
@@ -177,49 +195,46 @@ class LIM(object):
         obj is provided it will output the forecast to this file if desired.
         """
 
-        # Calculate anomaly time series from the data
-        self._run_mean, _bedge, _tedge = run_mean(self._calibration,
-                                                  self._wsize,
-                                                  shave_yr=True)
-        self._anomaly_srs, _ = calc_anomaly(self._run_mean,
-                                            self._wsize)
+        assert isinstance(t0_data, Dt.BaseDataObject), \
+            't0_data must be an instance of BaseDataObject or subclass.'
+        assert t0_data.forced_flat or t0_data.is_masked, \
+            't0_data expects flattened spatial dimension'
+        assert t0_data._leading_time, \
+            't0_data expects a leading sampling dimension'
 
         # Calculate anomalies for initial data
-        t0_data, _, _ = run_mean(t0_data, self._wsize, shave_yr=True)
-        t0_data, _ = calc_anomaly(t0_data, self._wsize)  # M^xN
+        if not t0_data.is_run_mean:
+            t0_data.calc_running_mean(self._wsize, shave_yr=True)
+        if not t0_data.is_anomaly:
+            t0_data.calc_anomaly(self._wsize)
+
+        if t0_data.is_detrended:
+            forecast_data = t0_data.anomaly
+        else:
+            forecast_data = t0_data.data
 
         # Create output locations for our forecasts
-        fcast_out_shp = [len(self.fcast_times), self._neigs, t0_data.shape[0]]
-        if self._H5file is not None and use_h5:
-            h5f = self._H5file
+        fcast_out_shp = [len(self.fcast_times), self._neigs,
+                         forecast_data.shape[0]]
+
+        if self._h5file is not None and use_h5:
+            h5f = self._h5file
             # Create forecast groups
             fcast_out = _create_h5_fcast_grps(h5f,
                                               '/data/fcast_bin',
-                                              tb.Atom.from_dtype(t0_data.dtype),
+                                              tb.Atom.from_dtype(
+                                                  t0_data.data_dtype),
                                               fcast_out_shp[1:],
                                               self.fcast_times)
         else:
             fcast_out = zeros(fcast_out_shp)
         
-        # Area Weighting if _lats is set
-        if self._lats is not None:
-            if self.spatial_valid is not None:
-                data = _area_wgt(self._anomaly_srs, self._mask_lats)
-            else:
-                data = _area_wgt(self._anomaly_srs, self._lats)
-        else:
-            data = self._anomaly_srs
-
-        # Detrend data if desired
-        if detrend_data:
-            data = detrend(data, axis=0, type='linear')
-        
         # Calibrate the LIM with (J=neigs) EOFs from training data
-        eofs, _ = calc_eofs(data, self._neigs)         # eofs is NxJ
-        train_data = dot(eofs.T, data.T)             # JxM^
+        eofs, _ = calc_eofs(self._calibration, self._neigs)      # eofs is NxJ
+        train_data = dot(eofs.T, self._calibration[:].T)    # JxM^
         
         # Project our testing data into eof space
-        proj_t0_data = dot(eofs.T, t0_data.T)                     # JxM^
+        proj_t0_data = dot(eofs.T, forecast_data[:].T)              # JxM^
         
         # Forecasts using L to determine G-values
         if use_lag1:
@@ -254,7 +269,7 @@ class LIM(object):
                     fcast_out[i] = xf
 
         # Save EOFs to HDF5 file if needed
-        if self._H5file is not None and use_h5:
+        if self._h5file is not None and use_h5:
             eof_out = Dt.var_to_hdf5_carray(h5f, '/data', 'eofs', eofs)
         else:
             eof_out = eofs
@@ -275,13 +290,13 @@ class LIM(object):
         if h5file is not None:
             assert(type(h5file) == tb.File)
 
-            if self._H5file is not None:
-                self._H5file.close()
-                self._H5file = h5file
-            h5f = self._H5file
+            if self._h5file is not None:
+                self._h5file.close()
+                self._h5file = h5file
+            h5f = self._h5file
         else:
-            assert(type(self._H5file) == tb.File)
-            h5f = self._H5file
+            assert(type(self._h5file) == tb.File)
+            h5f = self._h5file
 
         try:
             data_grp = h5f.create_group(h5f.root, 'data',
@@ -337,12 +352,17 @@ class ResampleLIM(LIM):
     See the LIM Class docstring for references.
     """
 
-    def __init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
-                 hold_chk_pct, num_trials, area_wgt_lats=None, lons=None,
-                 h5file=None):
+    def __init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs,
+                 hold_chk_pct, num_trials, h5file=None):
         """
         Parameters
         ----------
+        calib_data_object: DataTools.BaseDataObject or subclass
+            Dataset for determining LIM forecast EOFs.  DataInput provids
+            a 2D MxN matrix where M (rows) represent temporal samples and
+            N(columns) represent spatial samples.  It handles data with
+            nan masking.  Note: If data is masked, saved output spatial
+            dimensions will be reduced to valid data.
         data_in: DataTools.DataInput
             Dataset for determining LIM forecast EOFs.  DataInput provids
             a 2D MxN matrix where M (rows) represent temporal samples and
@@ -367,28 +387,22 @@ class ResampleLIM(LIM):
             trials.  A large number of trials may result in significant
             overlaps between trials and skew your statistics due to
             repeated sampling of middle data.
-        area_wgt_lats: ndarray, Optional
-            Latitude vector pertaining to spatial dimension N.  If used area-
-            weighting will be performed for pricipal component calculations.
-        lons: ndarray, Optional
-            Longitude vector flattened to spatial dimension N.
         H5file: HDF5_Object, Optional
             File object to store LIM output.  It will create a series of
             directories under the given group
         """
 
-        LIM.__init__(self, data_in, wsize, fcast_times, fcast_num_pcs,
-                     area_wgt_lats, lons, h5file)
+        LIM.__init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs, h5file)
 
         # Need original input dataset for resampling
-        self._original_obs = copy(self._calibration)  # potential erase reference
+        self._original_obs = calib_data_object.orig_data
         self._num_trials = num_trials
 
         # Initialize important indice limits for resampling procedure
         _fcast_tdim = self.fcast_times[-1]*wsize
 
         # 2*self._wsize is to account for edge removal from running mean
-        _sample_tdim = self._original_obs.shape[0] - _fcast_tdim - 2*wsize
+        _sample_tdim = self._data_obj._full_shp[0] - _fcast_tdim - 2*wsize
         hold_chk = int(ceil(_sample_tdim/self._wsize * hold_chk_pct))
         self._test_tdim = hold_chk * self._wsize
         _useable_tdim = (_sample_tdim - self._test_tdim)
@@ -400,12 +414,7 @@ class ResampleLIM(LIM):
                                                ).astype(int16))
 
         # Calculate edge concatenation lengths for anomaly procedure
-        self._obs_run_mean, bedge, tedge = run_mean(self._calibration,
-                                                    wsize,
-                                                    shave_yr=True)
-        self._full_anomaly_srs, _ = calc_anomaly(self._obs_run_mean,
-                                                 self._wsize)
-        self._anom_edges = [bedge, tedge]
+        self._anom_edges = [self._bedge, self._tedge]
 
     def forecast(self, use_lag1=True, detrend_data=False):
         """Run LIM forecast using resampling
@@ -444,13 +453,14 @@ class ResampleLIM(LIM):
         """
 
         eof_shp = [self._num_trials,
-                   self._original_obs.shape[1],
+                   self._data_obj.data.shape[1],
                    self._neigs]
-        if self._H5file is not None:
-            h5f = self._H5file
 
-            fcast_atom = tb.Atom.from_dtype(self._original_obs.dtype)
-            eof_atom = tb.Atom.from_dtype(self._original_obs.dtype)
+        if self._h5file is not None:
+            h5f = self._h5file
+
+            fcast_atom = tb.Atom.from_dtype(self._data_obj.data_dtype)
+            eof_atom = tb.Atom.from_dtype(self._data_obj.data_dtype)
 
             _fcast_out = _create_h5_fcast_grps(h5f,
                                                '/data/fcast_bin',
@@ -481,10 +491,18 @@ class ResampleLIM(LIM):
                                     axis=0)
             test_set = obs_dat[(bot_idx - self._anom_edges[0]):
                                (top_idx + self._anom_edges[1])]
-            self._calibration = train_set
+
+            resample_dat_obj = Dt.BaseDataObject(
+                train_set, dim_coords=self._data_obj._dim_coords,
+                force_flat=True)
+            self.set_calibration(data_obj=resample_dat_obj)
+
+            forecast_obj = Dt.BaseDataObject(
+                test_set, dim_coords=self._data_obj._dim_coords,
+                force_flat=True)
 
             _fcast, _eofs = LIM.forecast(self,
-                                         test_set,
+                                         forecast_obj,
                                          detrend_data=detrend_data,
                                          use_h5=False)
 
@@ -519,13 +537,13 @@ class ResampleLIM(LIM):
         if h5file is not None:
             assert(type(h5file) == tb.File)
 
-            if self._H5file is not None:
-                self._H5file.close()
-                self._H5file = h5file
-            h5f = self._H5file
+            if self._h5file is not None:
+                self._h5file.close()
+                self._h5file = h5file
+            h5f = self._h5file
         else:
-            assert(type(self._H5file) == tb.File)
-            h5f = self._H5file
+            assert(type(self._h5file) == tb.File)
+            h5f = self._h5file
 
         try:
             data_grp = h5f.create_group(h5f.root, 'data',

@@ -41,12 +41,15 @@ def calc_anomaly(data, yrsize, climo=None):
     # Reshape to take monthly mean
     old_shp = data.shape
     new_shp = (old_shp[0]//yrsize, yrsize, old_shp[1])
+    data = data.reshape(new_shp)
 
     # Use of data[:] should work for ndarray or ndarray-like
     if climo is None:
-        climo = data[:].reshape(new_shp).mean(axis=0)
+        climo = data.mean(axis=0)
 
-    anomaly = data.reshape(new_shp) - climo
+    # anomaly = data[:].reshape(new_shp) - climo
+    anomaly = ne.evaluate('data - climo')
+
     return anomaly.reshape(old_shp), climo
 
 
@@ -105,7 +108,7 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
         in order from largest to smallest.
     """
 
-    eofs, svals, pcs = svds(data.T, k=num_eigs)
+    eofs, svals, pcs = svds(data[:].T, k=num_eigs)
     eofs = eofs[:, ::-1]
     svals = svals[::-1]
     pcs = pcs[::-1]
@@ -200,7 +203,7 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
     ----------
     data: ndarray
         Data matrix to perform running mean over. Expected to be in time(row) x
-        space(column) format.
+        space(column) format. And that samples span full years.
     window_size: int
         Size of the window to compute the running mean over.
     shave_yr: bool, optional
@@ -246,7 +249,6 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
         
     for i in xrange(new_shape[0]):
         cntr = cut_from_bot - bedge + i
-        result[i] = (data[cntr:(cntr+window_size)].sum(axis=0) /
-                     float(window_size))
+        result[i] = (data[cntr:(cntr+window_size)].mean(axis=0))
     
     return result, cut_from_bot, cut_from_top

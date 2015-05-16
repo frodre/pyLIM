@@ -1,41 +1,30 @@
-"""
-A simple collection of tests for various operations performed in pyLIM
+import pylim.DataTools as DT
+import pylim.LIM as LIM
+import tables as tb
 
-"""
+# filename = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
+# outf = '/home/chaos2/wperkins/data/pyLIM/test.h5'
+# outf2 = '/home/chaos2/wperkins/data/pyLIM/test2.h5'
+# varname = 'air'
 
-import numpy as np
+filename = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.nc'
+outf = '/home/chaos2/wperkins/data/pyLIM/test_lrg.h5'
+outf2 = '/home/chaos2/wperkins/data/pyLIM/test2_lrg.h5'
+varname = 'tas'
 
+h5f = tb.open_file(outf, 'w', filters=tb.Filters(complevel=0,
+                                                 complib='blosc'))
+h5f2 = tb.open_file(outf2, 'w', filters=tb.Filters(complevel=0,
+                                                   complib='blosc'))
+calib_obj = DT.netcdf_to_data_obj(filename, varname, h5file=h5f)
+fcast_obj = DT.Hdf5DataObject(calib_obj.orig_data[0:16*12], h5f,
+                              force_flat=True,
+                              dim_coords={'time': (0, range(16*12))})
+test_lim = LIM.LIM(calib_obj, 12, [0, 1], 20, h5file=h5f)
+test_lim.forecast(fcast_obj)
+h5f.close()
 
-def reshapeTest(data):
-    """
-    Tests reshaping of data to confirm that times stay in order.
-
-    Parameters
-    ----------
-    data: ndarray
-        Data to be reshaped and tested for consistency
-
-    Returns
-    -------
-    bool
-        Did it pass the test?    
-    """
-    shp = data.shape
-    num_years = shp[0]/12.
-    tmp_data = data.reshape(num_years, 12, shp[1], shp[2])
-
-    #Just to make sure it finds falses uncommment lines below
-    #tmp_copy = numpy.array(tmp_data, copy=True)
-    #tmp_data = tmp_copy
-    #tmp_data[0,0,:,:] = tmp_data[0,1,:,:]
-
-    for  i,tmp_map in enumerate(data):
-	reshaped_map = tmp_data[i/12, i%12, :, :]
-        if not (tmp_map==reshaped_map).all():
-            return False
-    return True 
-    
-def runMeanTest():
-    import Stats as st
-    
-    tmp = np.random.random( 30 )
+calib_obj = DT.netcdf_to_data_obj(filename, varname, h5file=h5f2)
+test_resample = LIM.ResampleLIM(calib_obj, 12, [0, 1], 20, 0.1, 20, h5file=h5f2)
+test_resample.forecast()
+h5f2.close()

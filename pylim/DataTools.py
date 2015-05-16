@@ -7,6 +7,9 @@ Author: Andre Perkins
 import tables as tb
 import numpy as np
 import os.path as path
+import warnings
+import netCDF4 as ncf
+import numexpr as ne
 
 from Stats import run_mean, calc_anomaly
 from scipy.signal import detrend
@@ -41,7 +44,8 @@ class BaseDataObject(object):
                 if shape[value[0]] == len(value[1])}
 
     def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
-                 is_anomaly=False, is_run_mean=False, is_detrended=False):
+                 is_anomaly=False, is_run_mean=False, is_detrended=False,
+                 is_area_weighted=False):
         """
         Construction of a DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -72,8 +76,19 @@ class BaseDataObject(object):
 
         assert data.ndim <= 4, 'Maximum of 4 dimensions are allowed.'
         self._full_shp = data.shape
+        self.data_dtype = data.dtype
         self.forced_flat = force_flat
         self._data_bins = {}
+
+        # Future possible data manipulation functionality
+        self.anomaly = None
+        self.is_anomaly = is_anomaly
+        self.running_mean = None
+        self.is_run_mean = is_run_mean
+        self.detrended = None
+        self.is_detrended = is_detrended
+        self.area_weighted = None
+        self.is_area_weighted = is_area_weighted
 
         # Match dimension coordinate vectors
         if dim_coords is not None:
@@ -89,8 +104,7 @@ class BaseDataObject(object):
                 self._time_shp = []
                 self._spatial_shp = self._full_shp
             self._dim_idx = self._match_dims(data.shape, dim_coords)
-            self._dim_coords = {key: value[1] for key, value in
-                                dim_coords.items()}
+            self._dim_coords = dim_coords
         else:
             self._leading_time = False
             self._time_shp = []
@@ -145,9 +159,6 @@ class BaseDataObject(object):
                 self.is_masked = True
                 self.valid_data = valid_data.flatten()
 
-        self.orig_data = self._new_databin(data, 'orig')
-        self.data = self.orig_data
-
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
             if self._leading_time:
@@ -155,6 +166,10 @@ class BaseDataObject(object):
                                          self._flat_spatial_shp)
             else:
                 self.data = data.reshape(self._flat_spatial_shp)
+
+        # Initialized here for flattening purposes
+        self.orig_data = self._new_databin(data, 'orig')
+        self.data = self.orig_data[:]
 
         # Compress the data if mask is present
         if compressed or self.is_masked:
@@ -169,17 +184,9 @@ class BaseDataObject(object):
                     self.compressed_data = self._new_databin(
                         self.data[self.valid_data],
                         'compressed')
-            self.data = self.compressed_data
+            self.data = self.compressed_data[:]
         else:
             self.compressed_data = None
-
-        # Future possible data manipulation functionality
-        self.anomaly = None
-        self.is_anomaly = is_anomaly
-        self.running_mean = None
-        self.is_run_mean = is_run_mean
-        self.detrended = None
-        self.is_detrended = is_detrended
 
     # Create data backend container
     def _new_databin(self, data, name):
@@ -228,7 +235,7 @@ class BaseDataObject(object):
             'specified leading sampling dimension'
         rmean, bedge, tedge = run_mean(self.data, window_size, **kwargs)
         self.running_mean = self._new_databin(rmean, 'run_mean')
-        self.data = self.running_mean
+        self.data = self.running_mean[:]
         self.is_run_mean = True
         # Running mean smooths data, no longer an anomaly or detrended
         self.is_anomaly = False
@@ -242,18 +249,33 @@ class BaseDataObject(object):
             'a specified leading sampling dimension'
         anomaly, climo = calc_anomaly(self.data, yr_size)
         self.anomaly = self._new_databin(anomaly, 'anomaly')
-        self.data = self.anomaly
+        self.data = self.anomaly[:]
         self.is_anomaly = True
         return self.anomaly
 
     def detrend_data(self):
         assert self._leading_time, 'Can only perform anomaly calculation with '\
             'a specified leading sampling dimension'
-        detrended = detrend(self.data[:], axis=0, type='linear')
+        detrended = detrend(self.data, axis=0, type='linear')
         self.detrended = self._new_databin(detrended, 'detrended')
         self.is_detrended = True
-        self.data = self.detrended
+        self.data = self.detrended[:]
         return self.detrended
+
+    def area_weight_data(self):
+        if self.LAT not in self._dim_idx.keys():
+            warnings.warn('No latitude dimension specified. No area weighting'
+                          'was performed.')
+            return self.data
+        lats = self.get_coordinate_grids([self.LAT])[self.LAT]
+        scale = np.sqrt(np.cos(np.radians(lats)))
+
+        awgt = self.data
+        awgt = ne.evaluate('awgt * scale')
+        self.area_weighted = self._new_databin(awgt,
+                                               'area_weighted')
+        self.is_area_weighted = True
+        self.data = self.area_weighted[:]
 
     def get_coordinate_grids(self, keys, compressed=True):
         grids = {}
@@ -265,7 +287,7 @@ class BaseDataObject(object):
             idx = self._dim_idx[key]
             if self._leading_time:
                 idx -= 1
-            coords = self._dim_coords[key]
+            coords = self._dim_coords[key][1]
             grid = np.copy(coords)
             for dim, _ in enumerate(self._spatial_shp):
                 if dim != idx:
@@ -355,7 +377,8 @@ class Hdf5DataObject(BaseDataObject):
         new = var_to_hdf5_carray(self.h5f,
                                  self._default_grp,
                                  name,
-                                 data)
+                                 data,
+                                 chunkshape=data[0:1].shape)
         self._data_bins[name] = new
         return new
 
@@ -487,3 +510,26 @@ def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
                                    shape=shape,
                                    **kwargs)
     return out_arr
+
+
+def netcdf_to_data_obj(filename, var_name, h5file=None):
+    try:
+        f = ncf.Dataset(filename, 'r')
+        data = f.variables[var_name][:]
+        coords = {BaseDataObject.LAT: f.variables['lat'][:],
+                  BaseDataObject.LON: f.variables['lon'][:]}
+        times = f.variables['time']
+        coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
+
+        for i, key in enumerate(f.dimensions.iterkeys()):
+            if key in coords.keys():
+                coords[key] = (i, coords[key])
+
+        if h5file is not None:
+            return Hdf5DataObject(data, h5file, dim_coords=coords, force_flat=True)
+
+        else:
+            return BaseDataObject(data, dim_coords=coords, force_flat=True)
+
+    finally:
+        f.close()
