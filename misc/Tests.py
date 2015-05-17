@@ -22,10 +22,12 @@ else:
 h5f = tb.open_file(outf, 'w', filters=tb.Filters(complevel=0,
                                                  complib='blosc'))
 calib_obj = DT.hdf5_to_data_obj(filename, varname, h5file=h5f)
-fcast_obj = DT.Hdf5DataObject(calib_obj.orig_data[0:16*12], h5f,
-                              force_flat=True,
-                              dim_coords={'time': (0, range(16*12))})
 test_lim = LIM.LIM(calib_obj, 12, [0, 1], 20, h5file=h5f)
+fcast_obj = DT.BaseDataObject(calib_obj.anomaly[0:16*12],
+                              force_flat=True,
+                              dim_coords={'time': (0, range(16*12))},
+                              is_run_mean=True,
+                              is_anomaly=True)
 test_lim.forecast(fcast_obj)
 h5f.close()
 

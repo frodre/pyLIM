@@ -140,19 +140,19 @@ class LIM(object):
 
         if not data_obj.is_run_mean:
             _, self._bedge, self._tedge = data_obj.calc_running_mean(
-                self._wsize,  shave_yr=True)
+                self._wsize, save=False,  shave_yr=True)
 
         if not data_obj.is_anomaly:
             data_obj.calc_anomaly(self._wsize)
 
         if not data_obj.is_area_weighted:
-            data_obj.area_weight_data()
+            data_obj.area_weight_data(save=False)
 
         if detrend_data and not data_obj.is_detrended:
-            data_obj.detrend_data()
+            data_obj.detrend_data(save=False)
             self._calibration = data_obj.data
-        elif not detrend_data and data_obj.is_detrended:
-            self._calibration = data_obj.area_weighted
+        # elif not detrend_data and data_obj.is_detrended:
+        #     self._calibration = data_obj.area_weighted
         else:
             self._calibration = data_obj.data
 
@@ -204,9 +204,9 @@ class LIM(object):
 
         # Calculate anomalies for initial data
         if not t0_data.is_run_mean:
-            t0_data.calc_running_mean(self._wsize, shave_yr=True)
+            t0_data.calc_running_mean(self._wsize, shave_yr=True, save=False)
         if not t0_data.is_anomaly:
-            t0_data.calc_anomaly(self._wsize)
+            t0_data.calc_anomaly(self._wsize, save=False)
 
         if t0_data.is_detrended:
             forecast_data = t0_data.anomaly
@@ -486,20 +486,21 @@ class ResampleLIM(LIM):
 
             # create testing and training sets
             obs_dat = self._original_obs
+            anom_dat = self._data_obj.anomaly
             train_set = concatenate((obs_dat[0:bot_idx],
                                      obs_dat[top_idx:]),
                                     axis=0)
-            test_set = obs_dat[(bot_idx - self._anom_edges[0]):
-                               (top_idx + self._anom_edges[1])]
+            test_set = anom_dat[trial:(trial + self._test_tdim)]
 
             resample_dat_obj = Dt.BaseDataObject(
                 train_set, dim_coords=self._data_obj._dim_coords,
-                force_flat=True)
+                force_flat=True, save_none=True)
             self.set_calibration(data_obj=resample_dat_obj)
 
             forecast_obj = Dt.BaseDataObject(
                 test_set, dim_coords=self._data_obj._dim_coords,
-                force_flat=True)
+                force_flat=True, is_run_mean=True, is_anomaly=True,
+                save_none=True)
 
             _fcast, _eofs = LIM.forecast(self,
                                          forecast_obj,

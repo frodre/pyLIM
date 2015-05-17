@@ -10,6 +10,7 @@ import os.path as path
 import warnings
 import netCDF4 as ncf
 import numexpr as ne
+import multiprocessing as mp
 
 from Stats import run_mean, calc_anomaly
 from scipy.signal import detrend
@@ -44,6 +45,7 @@ class BaseDataObject(object):
                 if shape[value[0]] == len(value[1])}
 
     def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
+                 save_none=False,
                  is_anomaly=False, is_run_mean=False, is_detrended=False,
                  is_area_weighted=False):
         """
@@ -78,6 +80,7 @@ class BaseDataObject(object):
         self._full_shp = data.shape
         self.data_dtype = data.dtype
         self.forced_flat = force_flat
+        self._save_none = save_none
         self._data_bins = {}
 
         # Future possible data manipulation functionality
@@ -159,6 +162,7 @@ class BaseDataObject(object):
                 self.is_masked = True
                 self.valid_data = valid_data.flatten()
 
+        self.data = data
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
             if self._leading_time:
@@ -168,8 +172,8 @@ class BaseDataObject(object):
                 self.data = data.reshape(self._flat_spatial_shp)
 
         # Initialized here for flattening purposes
-        self.orig_data = self._new_databin(data, 'orig')
-        self.data = self.orig_data[:]
+        if not save_none:
+            self.orig_data = self._new_databin(data, 'orig')
 
         # Compress the data if mask is present
         if compressed or self.is_masked:
@@ -177,14 +181,17 @@ class BaseDataObject(object):
                 self.compressed_data = self.orig_data
             elif self.is_masked:
                 if self._leading_time:
-                    self.compressed_data = self._new_databin(
-                        self.data[:, self.valid_data],
-                        'compressed')
+                    self.data = self.data[:, self.valid_data]
+                    if not save_none:
+                        self.compressed_data = self._new_databin(
+                            self.data,
+                            'compressed')
                 else:
-                    self.compressed_data = self._new_databin(
-                        self.data[self.valid_data],
-                        'compressed')
-            self.data = self.compressed_data[:]
+                    self.data = self.data[self.valid_data]
+                    if not save_none:
+                        self.compressed_data = self._new_databin(
+                            self.data,
+                            'compressed')
         else:
             self.compressed_data = None
 
@@ -230,52 +237,52 @@ class BaseDataObject(object):
 
         return full
 
-    def calc_running_mean(self, window_size, **kwargs):
+    def calc_running_mean(self, window_size, save=True, **kwargs):
         assert self._leading_time, 'Can only perform running mean with a '\
             'specified leading sampling dimension'
-        rmean, bedge, tedge = run_mean(self.data, window_size, **kwargs)
-        self.running_mean = self._new_databin(rmean, 'run_mean')
-        self.data = self.running_mean[:]
+        self.data, bedge, tedge = run_mean(self.data, window_size,
+                                           **kwargs)
+        if save and not self._save_none:
+            self.running_mean = self._new_databin(self.data, 'run_mean')
         self.is_run_mean = True
         # Running mean smooths data, no longer an anomaly or detrended
         self.is_anomaly = False
         self.is_detrended = False
-        return self.running_mean, bedge, tedge
+        return self.data, bedge, tedge
 
     # TODO: Use provided time coordinates to determine year size
     # TODO: Determine if climo needs to be tied to object
-    def calc_anomaly(self, yr_size):
+    def calc_anomaly(self, yr_size, save=True):
         assert self._leading_time, 'Can only perform anomaly calculation with '\
             'a specified leading sampling dimension'
-        anomaly, climo = calc_anomaly(self.data, yr_size)
-        self.anomaly = self._new_databin(anomaly, 'anomaly')
-        self.data = self.anomaly[:]
+        self.data, climo = calc_anomaly(self.data, yr_size)
+        if save and not self._save_none:
+            self.anomaly = self._new_databin(self.data, 'anomaly')
         self.is_anomaly = True
         return self.anomaly
 
-    def detrend_data(self):
+    def detrend_data(self, save=True):
         assert self._leading_time, 'Can only perform anomaly calculation with '\
             'a specified leading sampling dimension'
-        detrended = detrend(self.data, axis=0, type='linear')
-        self.detrended = self._new_databin(detrended, 'detrended')
+        self.data = detrend(self.data, axis=0, type='linear')
+        if save and not self._save_none:
+            self.detrended = self._new_databin(self.data, 'detrended')
         self.is_detrended = True
-        self.data = self.detrended[:]
         return self.detrended
 
-    def area_weight_data(self):
+    def area_weight_data(self, save=True):
         if self.LAT not in self._dim_idx.keys():
             warnings.warn('No latitude dimension specified. No area weighting'
                           'was performed.')
             return self.data
         lats = self.get_coordinate_grids([self.LAT])[self.LAT]
         scale = np.sqrt(np.cos(np.radians(lats)))
-
         awgt = self.data
-        awgt = ne.evaluate('awgt * scale')
-        self.area_weighted = self._new_databin(awgt,
-                                               'area_weighted')
+        self.data = ne.evaluate('awgt * scale')
+        if save and not self._save_none:
+            self.area_weighted = self._new_databin(self.data,
+                                                   'area_weighted')
         self.is_area_weighted = True
-        self.data = self.area_weighted[:]
 
     def get_coordinate_grids(self, keys, compressed=True):
         grids = {}
@@ -311,7 +318,8 @@ class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
                  force_flat=False, is_anomaly=False, is_run_mean=False,
-                 is_detrended=False, default_grp='/data'):
+                 is_detrended=False, default_grp='/data',
+                 save_background=False):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -363,6 +371,13 @@ class Hdf5DataObject(BaseDataObject):
         self.h5f = h5file
         self._default_grp = None
         self.set_databin_grp(default_grp)
+        self._save_background = save_background
+        self._async_jobs = []
+
+        if self._save_background:
+            self._workers = mp.Pool()
+        else:
+            self._workers = None
 
         super(Hdf5DataObject, self).__init__(data,
                                              dim_coords=dim_coords,
@@ -374,13 +389,36 @@ class Hdf5DataObject(BaseDataObject):
 
     # Create backend data container
     def _new_databin(self, data, name):
-        new = var_to_hdf5_carray(self.h5f,
-                                 self._default_grp,
-                                 name,
-                                 data,
-                                 chunkshape=data[0:1].shape)
+
+        if self._save_background:
+            new = empty_hdf5_carray(self.h5f,
+                                    self._default_grp,
+                                    name,
+                                    tb.Atom.from_dtype(data.dtype),
+                                    data.shape)
+            self._async_jobs.append(
+                self._workers.apply_async(self._background_write_star,
+                                          [(new, data)]))
+        else:
+            new = var_to_hdf5_carray(self.h5f,
+                                     self._default_grp,
+                                     name,
+                                     data)
+
         self._data_bins[name] = new
         return new
+
+    @staticmethod
+    def _background_write(dest, src):
+        dest[:] = src
+
+    def _background_write_star(self, *dest_src):
+        self._background_write(*dest_src)
+
+    def flush_data(self):
+        for job in self._async_jobs:
+            job.get()
+        self._workers.join()
 
     def set_databin_grp(self, group):
         """
@@ -513,8 +551,10 @@ def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
 
 
 def netcdf_to_data_obj(filename, var_name, h5file=None):
+
+    f = ncf.Dataset(filename, 'r')
+
     try:
-        f = ncf.Dataset(filename, 'r')
         data = f.variables[var_name][:]
         coords = {BaseDataObject.LAT: f.variables['lat'][:],
                   BaseDataObject.LON: f.variables['lon'][:]}
@@ -527,6 +567,63 @@ def netcdf_to_data_obj(filename, var_name, h5file=None):
 
         if h5file is not None:
             return Hdf5DataObject(data, h5file, dim_coords=coords, force_flat=True)
+
+        else:
+            return BaseDataObject(data, dim_coords=coords, force_flat=True)
+
+    finally:
+        f.close()
+
+def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
+    f = ncf.Dataset(infile, 'r')
+    outf = tb.open_file(outfile, 'w', filters=tb.Filters(complib='blosc',
+                                                         complevel=0))
+
+    try:
+        data = f.variables[var_name]
+        atom = tb.Atom.from_dtype(data.datatype)
+        shape = data.shape
+        out = empty_hdf5_carray(outf, data_dir, var_name, atom, shape)
+        for i, chunk in enumerate(data):
+                out[i] = chunk
+
+        lat = var_to_hdf5_carray(outf, data_dir, 'lat',
+                                 f.variables['lat'][:])
+        lon = var_to_hdf5_carray(outf, data_dir, 'lon',
+                                 f.variables['lon'][:])
+        times = f.variables['time']
+        time_out = var_to_hdf5_carray(outf, data_dir, 'time',
+                                      times[:])
+        time_out.attrs.units = times.units
+
+        coord_dims = {'lat': lat.attrs, 'lon': lon.attrs,
+                      'time': time_out.attrs}
+
+        for i, key in enumerate(f.dimensions.iterkeys()):
+            if key in coord_dims.keys():
+                coord_dims[key].index = i
+    finally:
+        f.close()
+        outf.close()
+
+def hdf5_to_data_obj(filename, var_name, h5file=None, data_dir='/'):
+
+    f = tb.open_file(filename, 'r')
+
+    try:
+        data = f.get_node(data_dir, name=var_name)[:]
+        lat = f.get_node(data_dir+'lat')
+        lon = f.get_node(data_dir+'lon')
+        coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
+                  BaseDataObject.LON: (lon.attrs.index, lon[:])}
+        times = f.get_node(data_dir+'time')
+        coords[BaseDataObject.TIME] = (times.attrs.index,
+                                       ncf.num2date(times[:],
+                                                    times.attrs.units))
+
+        if h5file is not None:
+            return Hdf5DataObject(data, h5file, dim_coords=coords,
+                                  force_flat=True, save_background=False)
 
         else:
             return BaseDataObject(data, dim_coords=coords, force_flat=True)
