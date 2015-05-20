@@ -284,6 +284,15 @@ class BaseDataObject(object):
                                                    'area_weighted')
         self.is_area_weighted = True
 
+    def get_dim_coords(self, keys):
+        dim_coords = {}
+
+        for key in keys:
+            if key in self._dim_coords.keys():
+                dim_coords[key] = self._dim_coords[key]
+
+        return dim_coords
+
     def get_coordinate_grids(self, keys, compressed=True):
         grids = {}
 
