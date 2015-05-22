@@ -152,6 +152,7 @@ def test_basedataobj_data_force_flat():
     obj = BDO(data, force_flat=True)
     assert np.array_equal(data.flatten(), obj.data[:])
     assert obj.data.shape == data.flatten().shape
+    assert obj.orig_data.shape == data.flatten().shape
 
 
 def test_basedataobj_dim_matching():
@@ -204,7 +205,7 @@ def test_basedataobj_nanentry_noleadtime():
     data[2, 3, 1] = np.nan
     obj = BDO(data)
     assert obj.is_masked
-    np.testing.assert_array_equal(data, obj.orig_data)
+    np.testing.assert_array_equal(data.flatten(), obj.orig_data)
     assert np.array_equal(data.flatten()[:-1], obj.compressed_data)
     assert np.array_equal(data.flatten()[:-1], obj.data)
     np.testing.assert_array_equal(data,
@@ -429,7 +430,7 @@ def test_hdf5dataobj_nanentry_noleadtime(tb_file):
     data[2, 3, 1] = np.nan
     obj = HDO(data, tb_file)
     assert obj.is_masked
-    np.testing.assert_array_equal(data, obj.orig_data)
+    np.testing.assert_array_equal(data.flatten(), obj.orig_data)
     assert np.array_equal(data.flatten()[:-1], obj.compressed_data)
     assert np.array_equal(data.flatten()[:-1], obj.data)
     np.testing.assert_array_equal(data,

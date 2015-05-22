@@ -122,6 +122,7 @@ class LIM(object):
         self._h5file = h5file
         self._bedge = None
         self._tedge = None
+        self._eofs = None
 
         self.set_calibration()
 
@@ -150,11 +151,9 @@ class LIM(object):
 
         if detrend_data and not data_obj.is_detrended:
             data_obj.detrend_data(save=False)
-            self._calibration = data_obj.data
-        # elif not detrend_data and data_obj.is_detrended:
-        #     self._calibration = data_obj.area_weighted
-        else:
-            self._calibration = data_obj.data
+
+        self._calibration = data_obj.data
+        self._eofs, _ = calc_eofs(self._calibration, self._neigs)
 
     def forecast(self, t0_data, use_lag1=True, detrend_data=False,
                  use_h5=True):
@@ -230,7 +229,7 @@ class LIM(object):
             fcast_out = zeros(fcast_out_shp)
         
         # Calibrate the LIM with (J=neigs) EOFs from training data
-        eofs, _ = calc_eofs(self._calibration, self._neigs)      # eofs is NxJ
+        eofs = self._eofs     # eofs is NxJ
         train_data = dot(eofs.T, self._calibration[:].T)    # JxM^
         
         # Project our testing data into eof space
@@ -330,11 +329,12 @@ class ResampleLIM(LIM):
         LIM.__init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs, h5file)
 
         # Need original input dataset for resampling
-        self._original_obs = calib_data_object.orig_data
+        self._original_obs = calib_data_object.reset_data('orig')
         self._num_trials = num_trials
 
         # Initialize important indice limits for resampling procedure
         _fcast_tdim = self.fcast_times[-1]*wsize
+        self._fcast_tdim = _fcast_tdim
 
         # 2*self._wsize is to account for edge removal from running mean
         _sample_tdim = self._data_obj._full_shp[0] - _fcast_tdim - 2*wsize
@@ -422,18 +422,34 @@ class ResampleLIM(LIM):
             # create testing and training sets
             obs_dat = self._original_obs
             anom_dat = self._data_obj.anomaly
+            time_key = self._data_obj.TIME
+            lat_key = self._data_obj.LAT
+            dim_coords = self._data_obj.get_dim_coords([time_key])
+            time_coords = dim_coords[time_key][1]
+            lat_dim_coords = \
+                (1, self._data_obj.get_coordinate_grids([lat_key])[lat_key])
+
             train_set = concatenate((obs_dat[0:bot_idx],
                                      obs_dat[top_idx:]),
                                     axis=0)
+            train_times = concatenate((time_coords[0:bot_idx],
+                                       time_coords[top_idx:]),
+                                      axis=0)
             test_set = anom_dat[trial:(trial + self._test_tdim)]
+            test_times = time_coords[bot_idx:top_idx]
 
+            train_dim_coords = {time_key: (0, train_times),
+                                lat_key: lat_dim_coords}
             resample_dat_obj = Dt.BaseDataObject(
-                train_set, dim_coords=self._data_obj._dim_coords,
+                train_set, dim_coords=train_dim_coords,
                 force_flat=True, save_none=True)
-            self.set_calibration(data_obj=resample_dat_obj)
+            # use LIM calibration to calculate EOFs
+            LIM.set_calibration(self, data_obj=resample_dat_obj)
 
+            test_dim_coords = {time_key: (0, test_times),
+                               lat_key: lat_dim_coords}
             forecast_obj = Dt.BaseDataObject(
-                test_set, dim_coords=self._data_obj._dim_coords,
+                test_set, dim_coords=test_dim_coords,
                 force_flat=True, is_run_mean=True, is_anomaly=True,
                 save_none=True)
 
@@ -441,6 +457,9 @@ class ResampleLIM(LIM):
                                          forecast_obj,
                                          detrend_data=detrend_data,
                                          use_h5=False)
+
+            del resample_dat_obj
+            del forecast_obj
 
             # Place forecasts in the right trial, for the corresponding
             #   forecast bin.
@@ -450,7 +469,32 @@ class ResampleLIM(LIM):
 
         return _fcast_out, _eofs_out
 
-# This class will be experimental at most.
-# Have to make the assumption that anomaly uses entire sample average
-class RandomResampleLIM(LIM):
-    pass
+    def set_calibration(self, data_obj=None, detrend_data=False):
+        if data_obj is not None:
+            assert isinstance(data_obj, Dt.BaseDataObject), \
+                'data_obj must be an instance of BaseDataObject or'\
+                'its subclass.'
+        else:
+            data_obj = self._data_obj
+
+        assert data_obj.forced_flat or data_obj.is_masked, \
+            'data_obj expects flattened spatial dimension'
+        assert data_obj._leading_time, \
+            'data_obj expects a leading sampling dimension'
+
+        if not data_obj.is_run_mean:
+            _, self._bedge, self._tedge = data_obj.calc_running_mean(
+                self._wsize, save=False,  shave_yr=True)
+
+        if not data_obj.is_anomaly:
+            data_obj.calc_anomaly(self._wsize)
+
+        self._calibration = data_obj.data
+
+    def save_attrs(self):
+        h5f = self._h5file
+        data_node = h5f.get_node('/data')
+        data_node._v_attrs.yrsize = self._wsize
+        data_node._v_attrs.test_start_idxs = self._test_start_idx
+        data_node._v_attrs.fcast_times = self.fcast_times
+        data_node._v_attrs.fcast_tdim = self._fcast_tdim

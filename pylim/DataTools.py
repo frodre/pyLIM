@@ -39,6 +39,14 @@ class BaseDataObject(object):
     LAT = 'lat'
     LON = 'lon'
 
+    # Static databin keys
+    _COMPRESSED = 'compressed'
+    _ORIGDATA = 'orig'
+    _DETRENDED = 'detrended'
+    _AWGHT = 'area_weighted'
+    _RUNMEAN = 'run_mean'
+    _ANOMALY = 'anomaly'
+
     @staticmethod
     def _match_dims(shape, dim_coords):
         return {key: value[0] for key, value in dim_coords.items()
@@ -82,6 +90,7 @@ class BaseDataObject(object):
         self.forced_flat = force_flat
         self._save_none = save_none
         self._data_bins = {}
+        self._curr_data_key = None
 
         # Future possible data manipulation functionality
         self.anomaly = None
@@ -163,6 +172,7 @@ class BaseDataObject(object):
                 self.valid_data = valid_data.flatten()
 
         self.data = data
+        self._curr_data_key = self._ORIGDATA
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
             if self._leading_time:
@@ -173,7 +183,7 @@ class BaseDataObject(object):
 
         # Initialized here for flattening purposes
         if not save_none:
-            self.orig_data = self._new_databin(data, 'orig')
+            self.orig_data = self._new_databin(self.data, self._ORIGDATA)
 
         # Compress the data if mask is present
         if compressed or self.is_masked:
@@ -185,13 +195,14 @@ class BaseDataObject(object):
                     if not save_none:
                         self.compressed_data = self._new_databin(
                             self.data,
-                            'compressed')
+                            self._COMPRESSED)
                 else:
                     self.data = self.data[self.valid_data]
                     if not save_none:
                         self.compressed_data = self._new_databin(
                             self.data,
-                            'compressed')
+                            self._COMPRESSED)
+            self._curr_data_key = self._COMPRESSED
         else:
             self.compressed_data = None
 
@@ -243,7 +254,8 @@ class BaseDataObject(object):
         self.data, bedge, tedge = run_mean(self.data, window_size,
                                            **kwargs)
         if save and not self._save_none:
-            self.running_mean = self._new_databin(self.data, 'run_mean')
+            self.running_mean = self._new_databin(self.data, self._RUNMEAN)
+        self._curr_data_key = self._RUNMEAN
         self.is_run_mean = True
         # Running mean smooths data, no longer an anomaly or detrended
         self.is_anomaly = False
@@ -256,8 +268,10 @@ class BaseDataObject(object):
         assert self._leading_time, 'Can only perform anomaly calculation with '\
             'a specified leading sampling dimension'
         self.data, climo = calc_anomaly(self.data, yr_size)
+
         if save and not self._save_none:
-            self.anomaly = self._new_databin(self.data, 'anomaly')
+            self.anomaly = self._new_databin(self.data, self._ANOMALY)
+        self._curr_data_key = self._ANOMALY
         self.is_anomaly = True
         return self.anomaly
 
@@ -266,7 +280,8 @@ class BaseDataObject(object):
             'a specified leading sampling dimension'
         self.data = detrend(self.data, axis=0, type='linear')
         if save and not self._save_none:
-            self.detrended = self._new_databin(self.data, 'detrended')
+            self.detrended = self._new_databin(self.data, self._DETRENDED)
+        self._curr_data_key = self._DETRENDED
         self.is_detrended = True
         return self.detrended
 
@@ -281,7 +296,8 @@ class BaseDataObject(object):
         self.data = ne.evaluate('awgt * scale')
         if save and not self._save_none:
             self.area_weighted = self._new_databin(self.data,
-                                                   'area_weighted')
+                                                   self._AWGHT)
+        self._curr_data_key = self._AWGHT
         self.is_area_weighted = True
 
     def get_dim_coords(self, keys):
@@ -322,13 +338,21 @@ class BaseDataObject(object):
 
         return grids
 
+    # TODO: figure out consisntent state booleans is_detrended, etc.
+    def reset_data(self, key):
+        try:
+            self.data = self._data_bins[key][:]
+        except KeyError:
+            raise KeyError('Key {} not saved.  Could not reset self.data.')
+
+        return self.data
+
 
 class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
                  force_flat=False, is_anomaly=False, is_run_mean=False,
-                 is_detrended=False, default_grp='/data',
-                 save_background=False):
+                 is_detrended=False, default_grp='/data'):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -380,13 +404,6 @@ class Hdf5DataObject(BaseDataObject):
         self.h5f = h5file
         self._default_grp = None
         self.set_databin_grp(default_grp)
-        self._save_background = save_background
-        self._async_jobs = []
-
-        if self._save_background:
-            self._workers = mp.Pool()
-        else:
-            self._workers = None
 
         super(Hdf5DataObject, self).__init__(data,
                                              dim_coords=dim_coords,
@@ -398,36 +415,12 @@ class Hdf5DataObject(BaseDataObject):
 
     # Create backend data container
     def _new_databin(self, data, name):
-
-        if self._save_background:
-            new = empty_hdf5_carray(self.h5f,
-                                    self._default_grp,
-                                    name,
-                                    tb.Atom.from_dtype(data.dtype),
-                                    data.shape)
-            self._async_jobs.append(
-                self._workers.apply_async(self._background_write_star,
-                                          [(new, data)]))
-        else:
-            new = var_to_hdf5_carray(self.h5f,
-                                     self._default_grp,
-                                     name,
-                                     data)
-
+        new = var_to_hdf5_carray(self.h5f,
+                                 self._default_grp,
+                                 name,
+                                 data)
         self._data_bins[name] = new
         return new
-
-    @staticmethod
-    def _background_write(dest, src):
-        dest[:] = src
-
-    def _background_write_star(self, *dest_src):
-        self._background_write(*dest_src)
-
-    def flush_data(self):
-        for job in self._async_jobs:
-            job.get()
-        self._workers.join()
 
     def set_databin_grp(self, group):
         """
@@ -586,7 +579,7 @@ def netcdf_to_data_obj(filename, var_name, h5file=None):
 def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
     f = ncf.Dataset(infile, 'r')
     outf = tb.open_file(outfile, 'w', filters=tb.Filters(complib='blosc',
-                                                         complevel=0))
+                                                         complevel=5))
 
     try:
         data = f.variables[var_name]
@@ -632,7 +625,7 @@ def hdf5_to_data_obj(filename, var_name, h5file=None, data_dir='/'):
 
         if h5file is not None:
             return Hdf5DataObject(data, h5file, dim_coords=coords,
-                                  force_flat=True, save_background=False)
+                                  force_flat=True)
 
         else:
             return BaseDataObject(data, dim_coords=coords, force_flat=True)
