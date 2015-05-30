@@ -501,4 +501,4 @@ class ResampleLIM(LIM):
         data_node._v_attrs.yrsize = self._wsize
         data_node._v_attrs.test_start_idxs = self._test_start_idx
         data_node._v_attrs.fcast_times = self.fcast_times
-        data_node._v_attrs.fcast_tdim = self._fcast_tdim
+        data_node._v_attrs.test_tdim = self._test_tdim
