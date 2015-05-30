@@ -295,7 +295,7 @@ def fcast_ce(h5file):
     return ce_out
 
 
-def fcast_corr(h5file):
+def fcast_corr_old(h5file):
     """
     Calculate the local anomaly correlation for a LIM forecast at every point.
 
@@ -352,6 +352,78 @@ def fcast_corr(h5file):
         #     corr_out[i] += St.calc_ce(phys_fcast, compiled_obs[j], obs)
 
         corr_out[i] = St.calc_lac(phys_fcast, compiled_obs)
+
+    return corr_out
+
+def fcast_corr(h5file, avg_trial=False):
+    """
+    Calculate the local anomaly correlation for a LIM forecast at every point.
+
+    Parameters
+    ----------
+    h5file: tables.File
+        PyTables HDF5 file containing LIM forecast data.  All necessary
+        variables are loaded from this file.
+
+    Returns
+    -------
+    ndarray
+        Local anomaly correlation for each forecast lead time at all points.
+        (compared against observations)
+    """
+    if avg_trial:
+        node_name = 'corr_trial_avg'
+    else:
+        node_name = 'corr'
+    parent = '/stats'
+
+    assert(h5file is not None and type(h5file) == tb.File)
+
+    # Load necessary data
+    try:
+        obs = h5file.root.data.anomaly[:]
+        test_start_idxs = h5file.root.data._v_attrs.test_start_idxs
+        fcast_times = h5file.root.data._v_attrs.fcast_times
+        fcasts = h5file.list_nodes(h5file.root.data.fcast_bin)
+        eofs = h5file.root.data.eofs[:]
+        yrsize = h5file.root.data._v_attrs.yrsize
+        test_tdim = h5file.root.data._v_attrs.test_tdim
+    except tb.NodeError as e:
+        raise type(e)(e.message + ' Returning without finishing operation...')
+
+    # Create output location in h5file
+    atom = tb.Atom.from_dtype(obs.dtype)
+    corr_shp = [len(fcast_times), obs.shape[1]]
+
+    try:
+        corr_out = Dt.empty_hdf5_carray(h5file, parent, node_name, atom,
+                                        corr_shp,
+                                        title="Spatial Correlation",
+                                        createparents=True)
+    except tb.FileModeError:
+        corr_out = np.zeros(corr_shp)
+
+    # Calculate LAC
+    for i, lead in enumerate(fcast_times):
+        print 'Calculating Correlation: %i yr fcast' % lead
+        if avg_trial:
+            for j, trial in enumerate(fcasts[i]):
+                phys_fcast = np.dot(trial.T, eofs[j].T)
+                compiled_obs = build_trial_obs(obs, [test_start_idxs[j]],
+                                               lead*yrsize, test_tdim)
+                if j == 0:
+                    corr = St.calc_lac(phys_fcast, compiled_obs)
+                else:
+                    corr += St.calc_lac(phys_fcast, compiled_obs)
+
+            corr /= float(j)
+        else:
+            compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
+            data = fcasts[i].read()
+            phys_fcast = build_trial_fcast(data, eofs)
+            corr = St.calc_lac(phys_fcast, compiled_obs)
+
+        corr_out[i] = corr
 
     return corr_out
     
