@@ -387,6 +387,8 @@ class ResampleLIM(LIM):
         obj is provided it will output the forecast to this file if desired.
         """
 
+        print 'Beginning resampling forecast experiment.'
+
         eof_shp = [self._num_trials,
                    self._data_obj.data.shape[1],
                    self._neigs]
@@ -466,6 +468,8 @@ class ResampleLIM(LIM):
             for i, fcast_bin in enumerate(_fcast_out):
                 fcast_bin[j] = _fcast[i]
             _eofs_out[j] = _eofs
+
+            print 'Trial {} finished.'.format(j+1)
 
         return _fcast_out, _eofs_out
 
