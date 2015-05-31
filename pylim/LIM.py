@@ -452,7 +452,7 @@ class ResampleLIM(LIM):
                                lat_key: lat_dim_coords}
             forecast_obj = Dt.BaseDataObject(
                 test_set, dim_coords=test_dim_coords,
-                force_flat=True, is_run_mean=True, is_anomaly=True,
+                force_flat=True, is_run_mean=True,
                 save_none=True)
 
             _fcast, _eofs = LIM.forecast(self,

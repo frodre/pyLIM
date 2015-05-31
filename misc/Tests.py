@@ -3,7 +3,7 @@ import pylim.LIM as LIM
 import tables as tb
 import os
 
-CASE = 1
+CASE = 4
 
 if CASE == 1:
     if os.name == 'nt':
@@ -16,6 +16,7 @@ if CASE == 1:
     fcast_times = range(10)
     hold_chk = 0.05
     trials = 20
+    lag1 = True
 
 
 if CASE == 2:
@@ -25,6 +26,7 @@ if CASE == 2:
     fcast_times = range(10)
     hold_chk = 0.1
     trials = 20
+    lag1 = True
 
 
 if CASE == 3:
@@ -34,6 +36,16 @@ if CASE == 3:
     fcast_times = range(10)
     hold_chk = 0.5
     trials = 2
+    lag1 = True
+
+if CASE == 4:
+    filename = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
+    outf = '/home/chaos2/wperkins/data/pyLIM/20CR_fix_check.h5'
+    varname = 'air'
+    fcast_times = range(10)
+    hold_chk = 0.1
+    trials = 30
+    lag1 = True
 
 # node_cache_slots reduced for large dataset resample exp
 hf5 = tb.open_file(outf, 'w', filters=tb.Filters(complevel=2,
@@ -50,6 +62,6 @@ wsize = 12
 num_eigs = 20
 test_resample = LIM.ResampleLIM(calib_obj, wsize, fcast_times, num_eigs,
                                 hold_chk, trials, h5file=hf5)
-test_resample.forecast()
+test_resample.forecast(use_lag1=lag1)
 test_resample.save_attrs()
 hf5.close()
