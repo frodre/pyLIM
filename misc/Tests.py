@@ -52,7 +52,7 @@ hf5 = tb.open_file(outf, 'w', filters=tb.Filters(complevel=2,
                                                  complib='blosc'),
                    node_cache_slots=1)
 
-if os.path.splitext(filename)[1] == 'nc':
+if os.path.splitext(filename)[1] == '.nc':
     calib_obj = DT.netcdf_to_data_obj(filename, varname, h5file=hf5)
 else:
     calib_obj = DT.hdf5_to_data_obj(filename, varname, h5file=hf5)
