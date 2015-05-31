@@ -46,6 +46,7 @@ class BaseDataObject(object):
     _AWGHT = 'area_weighted'
     _RUNMEAN = 'run_mean'
     _ANOMALY = 'anomaly'
+    _CLIMO = 'climo'
 
     @staticmethod
     def _match_dims(shape, dim_coords):
@@ -94,6 +95,7 @@ class BaseDataObject(object):
 
         # Future possible data manipulation functionality
         self.anomaly = None
+        self.climo = None
         self.is_anomaly = is_anomaly
         self.running_mean = None
         self.is_run_mean = is_run_mean
@@ -264,13 +266,14 @@ class BaseDataObject(object):
 
     # TODO: Use provided time coordinates to determine year size
     # TODO: Determine if climo needs to be tied to object
-    def calc_anomaly(self, yr_size, save=True):
+    def calc_anomaly(self, yr_size, save=True, climo=None):
         assert self._leading_time, 'Can only perform anomaly calculation with '\
             'a specified leading sampling dimension'
-        self.data, climo = calc_anomaly(self.data, yr_size)
+        self.data, climo = calc_anomaly(self.data, yr_size, climo=climo)
 
         if save and not self._save_none:
             self.anomaly = self._new_databin(self.data, self._ANOMALY)
+        self.climo = climo
         self._curr_data_key = self._ANOMALY
         self.is_anomaly = True
         return self.anomaly

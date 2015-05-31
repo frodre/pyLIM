@@ -123,6 +123,7 @@ class LIM(object):
         self._bedge = None
         self._tedge = None
         self._eofs = None
+        self._climo = None
 
         self.set_calibration()
 
@@ -145,6 +146,7 @@ class LIM(object):
 
         if not data_obj.is_anomaly:
             data_obj.calc_anomaly(self._wsize)
+            self._climo = data_obj.climo[:]
 
         if not data_obj.is_area_weighted:
             data_obj.area_weight_data(save=False)
@@ -205,7 +207,7 @@ class LIM(object):
         if not t0_data.is_run_mean:
             t0_data.calc_running_mean(self._wsize, shave_yr=True, save=False)
         if not t0_data.is_anomaly:
-            t0_data.calc_anomaly(self._wsize, save=False)
+            t0_data.calc_anomaly(self._wsize, save=False, climo=self._climo)
 
         if t0_data.is_detrended:
             forecast_data = t0_data.anomaly
