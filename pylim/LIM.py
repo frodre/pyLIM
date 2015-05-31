@@ -423,7 +423,6 @@ class ResampleLIM(LIM):
 
             # create testing and training sets
             obs_dat = self._original_obs
-            anom_dat = self._data_obj.anomaly
             time_key = self._data_obj.TIME
             lat_key = self._data_obj.LAT
             dim_coords = self._data_obj.get_dim_coords([time_key])
@@ -437,8 +436,10 @@ class ResampleLIM(LIM):
             train_times = concatenate((time_coords[0:bot_idx],
                                        time_coords[top_idx:]),
                                       axis=0)
-            test_set = anom_dat[trial:(trial + self._test_tdim)]
-            test_times = time_coords[bot_idx:top_idx]
+            test_set = obs_dat[(bot_idx - self._anom_edges[0]):
+                               (top_idx + self._anom_edges[1])]
+            test_times = time_coords[(bot_idx - self._anom_edges[0]):
+                                     (top_idx + self._anom_edges[1])]
 
             train_dim_coords = {time_key: (0, train_times),
                                 lat_key: lat_dim_coords}
@@ -452,8 +453,7 @@ class ResampleLIM(LIM):
                                lat_key: lat_dim_coords}
             forecast_obj = Dt.BaseDataObject(
                 test_set, dim_coords=test_dim_coords,
-                force_flat=True, is_run_mean=True,
-                save_none=True)
+                force_flat=True, save_none=True)
 
             _fcast, _eofs = LIM.forecast(self,
                                          forecast_obj,
@@ -502,3 +502,11 @@ class ResampleLIM(LIM):
         data_node._v_attrs.test_start_idxs = self._test_start_idx
         data_node._v_attrs.fcast_times = self.fcast_times
         data_node._v_attrs.test_tdim = self._test_tdim
+
+        coords = self._data_obj.get_dim_coords([self._data_obj.LAT,
+                                                self._data_obj.LON])
+
+        Dt.var_to_hdf5_carray(h5f, data_node, 'lat',
+                              coords[self._data_obj.LAT][1])
+        Dt.var_to_hdf5_carray(h5f, data_node, 'lon',
+                              coords[self._data_obj.LON][1])

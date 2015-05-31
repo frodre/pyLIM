@@ -39,8 +39,12 @@ if CASE == 3:
     lag1 = True
 
 if CASE == 4:
-    filename = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
-    outf = '/home/chaos2/wperkins/data/pyLIM/20CR_fix_check.h5'
+    if os.name == 'nt':
+        filename = r'G:\Research\Hakim Research\data\20CR\air.2m.mon.mean.nc'
+        outf = r'G:\Research\Hakim Research\data\pyLIM\20CR_fix_check.h5'
+    else:
+        filename = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
+        outf = '/home/chaos2/wperkins/data/pyLIM/20CR_fix_check.h5'
     varname = 'air'
     fcast_times = range(10)
     hold_chk = 0.1
