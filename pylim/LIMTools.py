@@ -205,14 +205,15 @@ def build_trial_obs_from_h5(h5file, tau):
 
 
 # TODO: Implement correct significance testing
-def calc_corr_signif(fcast, obs):
+def calc_corr_signif(fcast, obs, corr=None):
     """
     Calculate local anomaly correlation along with 95% significance.
     """
     assert(fcast.shape == obs.shape)
 
     corr_neff = St.calc_n_eff(fcast, obs)
-    corr = St.calc_lac(fcast, obs)
+    if corr is None:
+        corr = St.calc_lac(fcast, obs)
 
     signif = np.empty_like(corr, dtype=np.bool)
 
@@ -230,8 +231,9 @@ def calc_corr_signif(fcast, obs):
     # if True in ((corr_neff <= 3) & (abs(corr) >= 0.5)):
     #     assert(False) # I have to figure out how to implement T_Test
     #     trow = np.where((corr_neff <= 20) & (corr >= 0.5))
+    signif[corr_neff <= 3] = False
 
-    return corr, signif
+    return signif, corr
 
 
 # TODO: Fix CE calculation for comparisons and add reference
@@ -372,16 +374,21 @@ def fcast_corr(h5file, avg_trial=False):
         (compared against observations)
     """
     if avg_trial:
-        node_name = 'corr_trial_avg'
+        corr_node_name = 'corr_trial_avg'
+        signif_node_name = 'corr_tavg_signif'
     else:
         node_name = 'corr'
+        signif_node_name = 'corr_signif'
     parent = '/stats'
 
     assert(h5file is not None and type(h5file) == tb.File)
 
     # Load necessary data
     try:
-        obs = h5file.root.data.anomaly[:]
+        try:
+            obs = h5file.root.data.anomaly[:]
+        except tb.NoSuchNodeError:
+            obs = h5file.root.data.detrended[:]
         test_start_idxs = h5file.root.data._v_attrs.test_start_idxs
         fcast_times = h5file.root.data._v_attrs.fcast_times
         fcasts = h5file.list_nodes(h5file.root.data.fcast_bin)
@@ -394,19 +401,24 @@ def fcast_corr(h5file, avg_trial=False):
     # Create output location in h5file
     atom = tb.Atom.from_dtype(obs.dtype)
     corr_shp = [len(fcast_times), obs.shape[1]]
+    signif = np.ones(corr_shp, dtype=np.bool)
 
     try:
         corr_out = Dt.empty_hdf5_carray(h5file, parent, node_name, atom,
                                         corr_shp,
                                         title="Spatial Correlation",
                                         createparents=True)
+        signif_out = Dt.var_to_hdf5_carray(h5file, parent, signif_node_name,
+                                           signif)
     except tb.FileModeError:
         corr_out = np.zeros(corr_shp)
+        signif_out = signif
 
     # Calculate LAC
     for i, lead in enumerate(fcast_times):
         print 'Calculating Correlation: %i yr fcast' % lead
         if avg_trial:
+            # TODO: Significance is currently ignored for avg_trial
             for j, trial in enumerate(fcasts[i]):
                 phys_fcast = np.dot(trial.T, eofs[j].T)
                 compiled_obs = build_trial_obs(obs, [test_start_idxs[j]],
@@ -422,10 +434,12 @@ def fcast_corr(h5file, avg_trial=False):
             data = fcasts[i].read()
             phys_fcast = build_trial_fcast(data, eofs)
             corr = St.calc_lac(phys_fcast, compiled_obs)
+            sig, _ = calc_corr_signif(phys_fcast, compiled_obs, corr=corr)
 
         corr_out[i] = corr
+        signif_out[i] = sig
 
-    return corr_out
+    return corr_out, signif_out
     
 ####  PLOTTING FUNCTIONS  ####
 
