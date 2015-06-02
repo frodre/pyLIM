@@ -88,7 +88,7 @@ class LIM(object):
     """
     
     def __init__(self, calib_data_obj, wsize, fcast_times, fcast_num_pcs,
-                 h5file=None):
+                 detrend_data=False, h5file=None):
         """
         Parameters
         ----------
@@ -124,10 +124,11 @@ class LIM(object):
         self._tedge = None
         self._eofs = None
         self._climo = None
+        self._detrend_data = detrend_data
 
         self.set_calibration()
 
-    def set_calibration(self, data_obj=None, detrend_data=False):
+    def set_calibration(self, data_obj=None):
         if data_obj is not None:
             assert isinstance(data_obj, Dt.BaseDataObject), \
                 'data_obj must be an instance of BaseDataObject or'\
@@ -151,14 +152,13 @@ class LIM(object):
         if not data_obj.is_area_weighted:
             data_obj.area_weight_data(save=False)
 
-        if detrend_data and not data_obj.is_detrended:
+        if self._detrend_data and not data_obj.is_detrended:
             data_obj.detrend_data(save=False)
 
         self._calibration = data_obj.data
         self._eofs, _ = calc_eofs(self._calibration, self._neigs)
 
-    def forecast(self, t0_data, use_lag1=True, detrend_data=False,
-                 use_h5=True):
+    def forecast(self, t0_data, use_lag1=True, use_h5=True):
         """Run LIM forecast from given data.
         
         Performs LIM forecast over the times specified by the
@@ -209,10 +209,10 @@ class LIM(object):
         if not t0_data.is_anomaly:
             t0_data.calc_anomaly(self._wsize, save=False, climo=self._climo)
 
-        if t0_data.is_detrended:
-            forecast_data = t0_data.anomaly
-        else:
-            forecast_data = t0_data.data
+        if self._detrend_data and not t0_data.is_detrended:
+            t0_data.detrend_data(save=False)
+
+        forecast_data = t0_data.data
 
         # Create output locations for our forecasts
         fcast_out_shp = [len(self.fcast_times), self._neigs,
@@ -289,7 +289,7 @@ class ResampleLIM(LIM):
     """
 
     def __init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs,
-                 hold_chk_pct, num_trials, h5file=None):
+                 hold_chk_pct, num_trials, detrend_data=False, h5file=None):
         """
         Parameters
         ----------
@@ -328,7 +328,8 @@ class ResampleLIM(LIM):
             directories under the given group
         """
 
-        LIM.__init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs, h5file)
+        LIM.__init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs,
+                     detrend_data=detrend_data, h5file=h5file)
 
         # Need original input dataset for resampling
         self._original_obs = calib_data_object.reset_data('orig')
@@ -353,7 +354,7 @@ class ResampleLIM(LIM):
         # Calculate edge concatenation lengths for anomaly procedure
         self._anom_edges = [self._bedge, self._tedge]
 
-    def forecast(self, use_lag1=True, detrend_data=False):
+    def forecast(self, use_lag1=True):
         """Run LIM forecast using resampling
 
         Performs LIM forecast over the times specified by the
@@ -425,6 +426,10 @@ class ResampleLIM(LIM):
 
             # create testing and training sets
             obs_dat = self._original_obs
+            if self._detrend_data:
+                anom_dat = self._data_obj.detrended
+            else:
+                anom_dat = self._data_obj.anomaly
             time_key = self._data_obj.TIME
             lat_key = self._data_obj.LAT
             dim_coords = self._data_obj.get_dim_coords([time_key])
@@ -438,10 +443,13 @@ class ResampleLIM(LIM):
             train_times = concatenate((time_coords[0:bot_idx],
                                        time_coords[top_idx:]),
                                       axis=0)
-            test_set = obs_dat[(bot_idx - self._anom_edges[0]):
-                               (top_idx + self._anom_edges[1])]
-            test_times = time_coords[(bot_idx - self._anom_edges[0]):
-                                     (top_idx + self._anom_edges[1])]
+            # test_set = obs_dat[(bot_idx - self._anom_edges[0]):
+            #                    (top_idx + self._anom_edges[1])]
+            test_set = anom_dat[trial:(trial+self._test_tdim)]
+
+            # test_times = time_coords[(bot_idx - self._anom_edges[0]):
+            #                          (top_idx + self._anom_edges[1])]
+            test_times = time_coords[bot_idx:top_idx]
 
             train_dim_coords = {time_key: (0, train_times),
                                 lat_key: lat_dim_coords}
@@ -454,12 +462,16 @@ class ResampleLIM(LIM):
             test_dim_coords = {time_key: (0, test_times),
                                lat_key: lat_dim_coords}
             forecast_obj = Dt.BaseDataObject(
-                test_set, dim_coords=test_dim_coords,
-                force_flat=True, save_none=True)
+                test_set,
+                dim_coords=test_dim_coords,
+                force_flat=True,
+                save_none=True,
+                is_run_mean=True,
+                is_anomaly=True,
+                is_detrended=self._detrend_data)
 
             _fcast, _eofs = LIM.forecast(self,
                                          forecast_obj,
-                                         detrend_data=detrend_data,
                                          use_h5=False)
 
             del resample_dat_obj
@@ -475,7 +487,7 @@ class ResampleLIM(LIM):
 
         return _fcast_out, _eofs_out
 
-    def set_calibration(self, data_obj=None, detrend_data=False):
+    def set_calibration(self, data_obj=None):
         if data_obj is not None:
             assert isinstance(data_obj, Dt.BaseDataObject), \
                 'data_obj must be an instance of BaseDataObject or'\
@@ -493,7 +505,11 @@ class ResampleLIM(LIM):
                 self._wsize, save=False,  shave_yr=True)
 
         if not data_obj.is_anomaly:
-            data_obj.calc_anomaly(self._wsize)
+            # Saved if we aren't detrending
+            data_obj.calc_anomaly(self._wsize, save=(not self._detrend_data))
+
+        if not data_obj.is_detrended and self._detrend_data:
+            data_obj.detrend_data()
 
         self._calibration = data_obj.data
 
