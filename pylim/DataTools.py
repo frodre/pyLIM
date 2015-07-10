@@ -350,6 +350,38 @@ class BaseDataObject(object):
 
         return self.data
 
+    @classmethod
+    def from_netcdf(cls, filename, var_name, h5file):
+
+        with ncf.Dataset(filename, 'r') as f:
+            data = f.variables[var_name][:]
+            coords = {BaseDataObject.LAT: f.variables['lat'][:],
+                      BaseDataObject.LON: f.variables['lon'][:]}
+            times = f.variables['time']
+            coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
+
+            for i, key in enumerate(f.dimensions.iterkeys()):
+                if key in coords.keys():
+                    coords[key] = (i, coords[key])
+
+            return cls(data, dim_coords=coords, force_flat=True)
+
+    @classmethod
+    def from_hdf5(cls, filename, var_name, data_dir='/'):
+
+        with tb.open_file(filename, 'r') as f:
+
+            data = f.get_node(data_dir, name=var_name)[:]
+            lat = f.get_node(data_dir+'lat')
+            lon = f.get_node(data_dir+'lon')
+            coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
+                      BaseDataObject.LON: (lon.attrs.index, lon[:])}
+            times = f.get_node(data_dir+'time')
+            coords[BaseDataObject.TIME] = (times.attrs.index,
+                                           ncf.num2date(times[:],
+                                                        times.attrs.units))
+            return cls(data, dim_coords=coords, force_flat=True)
+
 
 class Hdf5DataObject(BaseDataObject):
 
@@ -454,6 +486,38 @@ class Hdf5DataObject(BaseDataObject):
 
             self._default_grp = self.h5f.create_group(grp_path[0], grp_path[1],
                                                       createparents=True)
+
+    @classmethod
+    def from_netcdf(cls, filename, var_name, h5file):
+
+        with ncf.Dataset(filename, 'r') as f:
+            data = f.variables[var_name][:]
+            coords = {BaseDataObject.LAT: f.variables['lat'][:],
+                      BaseDataObject.LON: f.variables['lon'][:]}
+            times = f.variables['time']
+            coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
+
+            for i, key in enumerate(f.dimensions.iterkeys()):
+                if key in coords.keys():
+                    coords[key] = (i, coords[key])
+
+            return cls(data, h5file, dim_coords=coords, force_flat=True)
+
+    @classmethod
+    def from_hdf5(cls, filename, var_name, h5file, data_dir='/'):
+
+        with tb.open_file(filename, 'r') as f:
+
+            data = f.get_node(data_dir, name=var_name)[:]
+            lat = f.get_node(data_dir+'lat')
+            lon = f.get_node(data_dir+'lon')
+            coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
+                      BaseDataObject.LON: (lon.attrs.index, lon[:])}
+            times = f.get_node(data_dir+'time')
+            coords[BaseDataObject.TIME] = (times.attrs.index,
+                                           ncf.num2date(times[:],
+                                                        times.attrs.units))
+            return cls(data, h5file, dim_coords=coords, force_flat=True)
 
 
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
