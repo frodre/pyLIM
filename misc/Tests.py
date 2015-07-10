@@ -55,7 +55,7 @@ elif CASE == 4:
     lag1 = True
     detrend = False
 
-elif CASE == 5
+elif CASE == 5:
     filename = '/home/chaos2/wperkins/data/'
 
 # node_cache_slots reduced for large dataset resample exp
