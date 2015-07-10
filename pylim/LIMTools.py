@@ -377,7 +377,7 @@ def fcast_corr(h5file, avg_trial=False):
         corr_node_name = 'corr_trial_avg'
         signif_node_name = 'corr_tavg_signif'
     else:
-        node_name = 'corr'
+        corr_node_name = 'corr'
         signif_node_name = 'corr_signif'
     parent = '/stats'
 
@@ -404,7 +404,7 @@ def fcast_corr(h5file, avg_trial=False):
     signif = np.ones(corr_shp, dtype=np.bool)
 
     try:
-        corr_out = Dt.empty_hdf5_carray(h5file, parent, node_name, atom,
+        corr_out = Dt.empty_hdf5_carray(h5file, parent, corr_node_name, atom,
                                         corr_shp,
                                         title="Spatial Correlation",
                                         createparents=True)
@@ -437,7 +437,8 @@ def fcast_corr(h5file, avg_trial=False):
             sig, _ = calc_corr_signif(phys_fcast, compiled_obs, corr=corr)
 
         corr_out[i] = corr
-        signif_out[i] = sig
+        if not avg_trial:
+            signif_out[i] = sig
 
     return corr_out, signif_out
     
@@ -525,7 +526,7 @@ def plot_cedata(lats, lons, data, title):
     plt.show()
 
 
-def plot_spatial(lats, lons, data, title):
+def plot_spatial(lats, lons, data, title, outfile=None):
     """
     Method for basic spatial data plots.  Uses diverging color scheme, so 
     current implementation is best for anomaly data.  Created initially just
@@ -564,4 +565,6 @@ def plot_spatial(lats, lons, data, title):
     m.colorbar()
     
     plt.title(title)
+    if outfile is not None:
+        plt.savefig(outfile)
     plt.show()
