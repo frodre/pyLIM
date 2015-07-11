@@ -351,7 +351,7 @@ class BaseDataObject(object):
         return self.data
 
     @classmethod
-    def from_netcdf(cls, filename, var_name, h5file):
+    def from_netcdf(cls, filename, var_name):
 
         with ncf.Dataset(filename, 'r') as f:
             data = f.variables[var_name][:]
