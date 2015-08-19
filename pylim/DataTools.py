@@ -66,10 +66,10 @@ class BaseDataObject(object):
         ----------
         data: ndarray
             Input dataset to be used.
-        dim_coords: dict(str:ndarray)
-            Coordinate vector dictionary for supplied data.  Please use
-            DataObject attributes (e.g. DataObject.TIME) for dictionary
-            keys.
+        dim_coords: dict(str:(int, ndarray)
+            Demension position and oordinate vector dictionary for supplied
+            data.  Please use DataObject attributes (e.g. DataObject.TIME)
+            for dictionary keys.
         valid_data: ndarray (np.bool), optional
             Array corresponding to valid data in the of the input dataset
             or uncompressed version of the input dataset.  Should have the same
@@ -294,7 +294,7 @@ class BaseDataObject(object):
                           'was performed.')
             return self.data
         lats = self.get_coordinate_grids([self.LAT])[self.LAT]
-        scale = np.sqrt(np.cos(np.radians(lats)))
+        scale = np.sqrt(abs(np.cos(np.radians(lats))))
         awgt = self.data
         self.data = ne.evaluate('awgt * scale')
         if save and not self._save_none:
@@ -619,7 +619,7 @@ def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
     return out_arr
 
 
-def netcdf_to_data_obj(filename, var_name, h5file=None):
+def netcdf_to_data_obj(filename, var_name, h5file=None, force_flat=True):
 
     f = ncf.Dataset(filename, 'r')
 
@@ -635,10 +635,12 @@ def netcdf_to_data_obj(filename, var_name, h5file=None):
                 coords[key] = (i, coords[key])
 
         if h5file is not None:
-            return Hdf5DataObject(data, h5file, dim_coords=coords, force_flat=True)
+            return Hdf5DataObject(data, h5file, dim_coords=coords,
+                                  force_flat=force_flat)
 
         else:
-            return BaseDataObject(data, dim_coords=coords, force_flat=True)
+            return BaseDataObject(data, dim_coords=coords,
+                                  force_flat=force_flat)
 
     finally:
         f.close()
