@@ -5,22 +5,20 @@ Main Linear Inverse Model classes and methods.
 Author: Andre Perkins
 """
 
-from numpy import sqrt, cos, radians, dot, log, exp, zeros, array, int16, copy
-from numpy import linspace, unique, concatenate, copy
-from numpy.linalg import pinv
-from scipy.signal import detrend
+import numpy as np
+from numpy.linalg import pinv, matrix_rank, cond
+from scipy.linalg import eig, inv
 from math import ceil
 import tables as tb
-import os.path as path
 
-from Stats import calc_eofs, run_mean, calc_anomaly
+from Stats import calc_eofs
 import DataTools as Dt
 
 
 def _area_wgt(data, lats):
     """Apply area weighting to data based on provided latitude values."""
     assert(data.shape[-1] == lats.shape[-1])
-    scale = sqrt(cos(radians(lats)))
+    scale = np.sqrt(np.cos(np.radians(lats)))
     return data * scale
 
 
@@ -32,11 +30,20 @@ def _calc_m(x0, xt):
     #    Note: x is an anomaly vector, no division by N-1 because it's undone
     #    in the inversion anyways
     
-    x0x0 = dot(x0, x0.T)
-    x0xt = dot(xt, x0.T)
+    x0x0 = np.dot(x0, x0.T)
+    x0xt = np.dot(xt, x0.T)
+
+    # print 'Matrix Ranks...
+    # print 'C(0): ', matrix_rank(x0x0)
+    # print 'C(1): ', matrix_rank(x0xt)
+    # print 'inv(C(0)) ', matrix_rank(pinv(x0x0))
+    # print 'C(1)*C(0)^-1: ', matrix_rank(dot(x0xt, pinv(x0x0)))
+
+    # print 'Condition number'
+    # print 'C(0): ', cond(x0x0)
     
     # Calculate tau-lag G value
-    return dot(x0xt, pinv(x0x0))
+    return np.dot(x0xt, pinv(x0x0))
 
 
 def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
@@ -86,9 +93,9 @@ class LIM(object):
     --------
     ....
     """
-    
+
     def __init__(self, calib_data_obj, wsize, fcast_times, fcast_num_pcs,
-                 detrend_data=False, h5file=None):
+                 detrend_data=False, h5file=None, L_eig_bump=None):
         """
         Parameters
         ----------
@@ -117,7 +124,7 @@ class LIM(object):
         self._data_obj = calib_data_obj
         self._calibration = None
         self._wsize = wsize
-        self.fcast_times = array(fcast_times, dtype=int16)
+        self.fcast_times = np.array(fcast_times, dtype=np.int16)
         self._neigs = fcast_num_pcs
         self._h5file = h5file
         self._bedge = None
@@ -125,6 +132,8 @@ class LIM(object):
         self._eofs = None
         self._climo = None
         self._detrend_data = detrend_data
+        self.G_1 = None
+        self.eig_bump = L_eig_bump
 
         self.set_calibration()
 
@@ -157,6 +166,25 @@ class LIM(object):
 
         self._calibration = data_obj.data
         self._eofs, _ = calc_eofs(self._calibration, self._neigs)
+
+        train_data = np.dot(self._eofs.T, self._calibration[:].T)
+        tdim = train_data.shape[1] - self._wsize
+        x0 = train_data[:, 0:tdim]
+        x1 = train_data[:, self._wsize:]
+        self.G_1 = _calc_m(x0, x1)
+
+        if self.eig_bump is not None:
+            self.G_1 = self.eig_adjust(self.G_1)
+
+    def eig_adjust(self, G):
+
+        evals, evecs = eig(G)
+        evals = np.log(evals)
+        evals += self.eig_bump
+        evals = np.exp(evals)
+
+        # E * lambda * E^-1
+        return np.dot(evecs, np.dot(evals, inv(evecs))).real
 
     def forecast(self, t0_data, use_lag1=True, use_h5=True):
         """Run LIM forecast from given data.
@@ -228,42 +256,42 @@ class LIM(object):
                                               fcast_out_shp[1:],
                                               self.fcast_times)
         else:
-            fcast_out = zeros(fcast_out_shp)
-        
+            fcast_out = np.zeros(fcast_out_shp)
+
         # Calibrate the LIM with (J=neigs) EOFs from training data
         eofs = self._eofs     # eofs is NxJ
-        train_data = dot(eofs.T, self._calibration[:].T)    # JxM^
-        
+        train_data = np.dot(eofs.T, self._calibration[:].T)    # JxM^
+
         # Project our testing data into eof space
-        proj_t0_data = dot(eofs.T, forecast_data[:].T)              # JxM^
-        
+        proj_t0_data = np.dot(eofs.T, forecast_data[:].T)              # JxM^
+
         # Forecasts using L to determine G-values
         if use_lag1:
             # Calculate L from time-lag of one window size (1-year for our LIM)
-            tau = self._wsize  
-            train_tdim = train_data.shape[1] - tau
-            x0 = train_data[:, 0:train_tdim]
-            xt = train_data[:, tau:(train_tdim+tau)]
-            
-            g_1 = _calc_m(x0, xt)
+
+            g_1 = self.G_1
             for i, tau in enumerate(self.fcast_times):
                 g = g_1**tau
-                xf = dot(g, proj_t0_data)
+                xf = np.dot(g, proj_t0_data)
                 if use_h5:
                     fcast_out[i][:] = xf
                 else:
                     fcast_out[i] = xf
-        
+
         # Forecasts using G only    
         else:
             # Training data has to allow for lag of max forecast time
             train_tdim = train_data.shape[1] - self.fcast_times[-1]*self._wsize
             x0 = train_data[:, 0:train_tdim]
-            
+
             for i, tau in enumerate(self.fcast_times*self._wsize):
                 xt = train_data[:, tau:(train_tdim+tau)]
                 g = _calc_m(x0, xt)
-                xf = dot(g, proj_t0_data)
+
+                if self.eig_bump is not None:
+                    g = self.eig_adjust(g)
+
+                xf = np.dot(g, proj_t0_data)
                 if use_h5:
                     fcast_out[i][:] = xf
                 else:
@@ -346,10 +374,10 @@ class ResampleLIM(LIM):
         _useable_tdim = (_sample_tdim - self._test_tdim)
         self._trials_out_shp = [len(self.fcast_times), self._num_trials,
                                 self._neigs, self._test_tdim]
-        self._test_start_idx = unique(linspace(0,
+        self._test_start_idx = np.unique(np.linspace(0,
                                                _useable_tdim,
                                                self._num_trials
-                                               ).astype(int16))
+                                               ).astype(np.int16))
 
         # Calculate edge concatenation lengths for anomaly procedure
         self._anom_edges = [self._bedge, self._tedge]
@@ -415,8 +443,8 @@ class ResampleLIM(LIM):
                                              title='Calculated EOFs by Trial')
 
         else:
-            _fcast_out = zeros(self._trials_out_shp)
-            _eofs_out = zeros(eof_shp)
+            _fcast_out = np.zeros(self._trials_out_shp)
+            _eofs_out = np.zeros(eof_shp)
 
         for j, trial in enumerate(self._test_start_idx):
 
@@ -437,12 +465,12 @@ class ResampleLIM(LIM):
             lat_dim_coords = \
                 (1, self._data_obj.get_coordinate_grids([lat_key])[lat_key])
 
-            train_set = concatenate((obs_dat[0:bot_idx],
-                                     obs_dat[top_idx:]),
-                                    axis=0)
-            train_times = concatenate((time_coords[0:bot_idx],
-                                       time_coords[top_idx:]),
-                                      axis=0)
+            train_set = np.concatenate((obs_dat[0:bot_idx],
+                                       obs_dat[top_idx:]),
+                                       axis=0)
+            train_times = np.concatenate((time_coords[0:bot_idx],
+                                         time_coords[top_idx:]),
+                                         axis=0)
             # test_set = obs_dat[(bot_idx - self._anom_edges[0]):
             #                    (top_idx + self._anom_edges[1])]
             test_set = anom_dat[trial:(trial+self._test_tdim)]
