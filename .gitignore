@@ -68,9 +68,9 @@ matplotlibrc
 #pyCharm stuff
 .idea/*
 
-
-
 *.gif
 *.avi
 *.mp4
 src/test.py
+
+scratch/*

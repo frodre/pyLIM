@@ -645,6 +645,34 @@ def netcdf_to_data_obj(filename, var_name, h5file=None, force_flat=True):
     finally:
         f.close()
 
+
+def posterior_ncf_to_data_obj(filename, var_name, h5file=None):
+
+    f = ncf.Dataset(filename, 'r')
+
+    try:
+        data = f.variables[var_name][:]
+        coords = {BaseDataObject.LAT: f.variables['lat'][:],
+                  BaseDataObject.LON: f.variables['lon'][:]}
+        times = (0, f.variables['time'][:])
+
+        coords['time'] = times
+        coords['lat'] = (1, coords['lat'])
+        coords['lon'] = (1, coords['lon'])
+
+        if h5file is not None:
+            return Hdf5DataObject(data, h5file, dim_coords=coords,
+                                  force_flat=True,
+                                  is_run_mean=True)
+
+        else:
+            return BaseDataObject(data, dim_coords=coords, force_flat=True,
+                                  is_run_mean=True)
+
+    finally:
+        f.close()
+
+
 def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
     f = ncf.Dataset(infile, 'r')
     outf = tb.open_file(outfile, 'w', filters=tb.Filters(complib='blosc',
