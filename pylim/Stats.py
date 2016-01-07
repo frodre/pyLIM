@@ -8,7 +8,7 @@ Author: Andre Perkins
 import numpy as np
 import numexpr as ne
 from math import ceil
-from scipy.sparse.linalg import svds
+from scipy.linalg import svd
 
 
 def calc_anomaly(data, yrsize, climo=None):
@@ -108,10 +108,10 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
         in order from largest to smallest.
     """
 
-    eofs, svals, pcs = svds(data[:].T, k=num_eigs)
-    eofs = eofs[:, ::-1]
-    svals = svals[::-1]
-    pcs = pcs[::-1]
+    eofs, svals, pcs = svd(data[:].T, full_matrices=False)
+    eofs = eofs[:, :num_eigs]
+    svals = svals[:num_eigs]
+    pcs = pcs[:num_eigs]
 
     if ret_pcs:
         return eofs, svals, pcs

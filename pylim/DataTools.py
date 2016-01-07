@@ -354,17 +354,17 @@ class BaseDataObject(object):
     def from_netcdf(cls, filename, var_name):
 
         with ncf.Dataset(filename, 'r') as f:
-            data = f.variables[var_name][:]
+            data = f.variables[var_name]
             coords = {BaseDataObject.LAT: f.variables['lat'][:],
                       BaseDataObject.LON: f.variables['lon'][:]}
             times = f.variables['time']
             coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
 
-            for i, key in enumerate(f.dimensions.iterkeys()):
+            for i, key in enumerate(data.dimensions):
                 if key in coords.keys():
                     coords[key] = (i, coords[key])
 
-            return cls(data, dim_coords=coords, force_flat=True)
+            return cls(data[:], dim_coords=coords, force_flat=True)
 
     @classmethod
     def from_hdf5(cls, filename, var_name, data_dir='/'):
@@ -624,22 +624,22 @@ def netcdf_to_data_obj(filename, var_name, h5file=None, force_flat=True):
     f = ncf.Dataset(filename, 'r')
 
     try:
-        data = f.variables[var_name][:]
+        data = f.variables[var_name]
         coords = {BaseDataObject.LAT: f.variables['lat'][:],
                   BaseDataObject.LON: f.variables['lon'][:]}
         times = f.variables['time']
         coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
 
-        for i, key in enumerate(f.dimensions.iterkeys()):
+        for i, key in enumerate(data.dimensions):
             if key in coords.keys():
                 coords[key] = (i, coords[key])
 
         if h5file is not None:
-            return Hdf5DataObject(data, h5file, dim_coords=coords,
+            return Hdf5DataObject(data[:], h5file, dim_coords=coords,
                                   force_flat=force_flat)
 
         else:
-            return BaseDataObject(data, dim_coords=coords,
+            return BaseDataObject(data[:], dim_coords=coords,
                                   force_flat=force_flat)
 
     finally:
