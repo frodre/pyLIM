@@ -11,6 +11,7 @@ import warnings
 import netCDF4 as ncf
 import numexpr as ne
 import multiprocessing as mp
+import cPickle as cpk
 
 from Stats import run_mean, calc_anomaly
 from scipy.signal import detrend
@@ -54,7 +55,7 @@ class BaseDataObject(object):
                 if shape[value[0]] == len(value[1])}
 
     def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
-                 save_none=False,
+                 save_none=False, time_units=None, time_cal=None,
                  is_anomaly=False, is_run_mean=False, is_detrended=False,
                  is_area_weighted=False):
         """
@@ -89,6 +90,8 @@ class BaseDataObject(object):
         self._full_shp = data.shape
         self.data_dtype = data.dtype
         self.forced_flat = force_flat
+        self.time_units = time_units
+        self.time_cal = time_cal
         self._save_none = save_none
         self._data_bins = {}
         self._curr_data_key = None
@@ -350,6 +353,19 @@ class BaseDataObject(object):
 
         return self.data
 
+    def save_dataobj_pckl(self, filename):
+
+        tmp_dimcoord = self._dim_coords[self.TIME]
+        tmp_time = tmp_dimcoord[1]
+        topckl_time = ncf.date2num(tmp_time, units=self.time_units,
+                                   calendar=self.time_cal)
+        self._dim_coords[self.TIME] = (tmp_dimcoord[0], topckl_time)
+
+        with open(filename, 'w') as f:
+            cpk.dump(self, f)
+
+        self._dim_coords[self.TIME] = (tmp_dimcoord[0], tmp_time)
+
     @classmethod
     def from_netcdf(cls, filename, var_name):
 
@@ -358,13 +374,15 @@ class BaseDataObject(object):
             coords = {BaseDataObject.LAT: f.variables['lat'][:],
                       BaseDataObject.LON: f.variables['lon'][:]}
             times = f.variables['time']
-            coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
+            coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units,
+                                                       calendar=times.calendar)
 
             for i, key in enumerate(data.dimensions):
                 if key in coords.keys():
                     coords[key] = (i, coords[key])
 
-            return cls(data[:], dim_coords=coords, force_flat=True)
+            return cls(data[:], dim_coords=coords, force_flat=True,
+                       time_units=times.units, time_cal=times.calendar)
 
     @classmethod
     def from_hdf5(cls, filename, var_name, data_dir='/'):
@@ -381,6 +399,19 @@ class BaseDataObject(object):
                                            ncf.num2date(times[:],
                                                         times.attrs.units))
             return cls(data, dim_coords=coords, force_flat=True)
+
+    @classmethod
+    def from_pickle(cls, filename):
+        with open(filename, 'r') as f:
+            dobj = cpk.load(f)
+
+        tmp_dimcoord = dobj._dim_coords[dobj.TIME]
+        tmp_time = tmp_dimcoord[1]
+        topckl_time = ncf.num2date(tmp_time, units=dobj.time_units,
+                                   calendar=dobj.time_cal)
+        dobj._dim_coords[dobj.TIME] = (tmp_dimcoord[0], topckl_time)
+
+        return dobj
 
 
 class Hdf5DataObject(BaseDataObject):
@@ -636,11 +667,11 @@ def netcdf_to_data_obj(filename, var_name, h5file=None, force_flat=True):
 
         if h5file is not None:
             return Hdf5DataObject(data[:], h5file, dim_coords=coords,
-                                  force_flat=force_flat)
+                                  force_flat=force_flat, time_units=times.units)
 
         else:
             return BaseDataObject(data[:], dim_coords=coords,
-                                  force_flat=force_flat)
+                                  force_flat=force_flat, time_units=times.units)
 
     finally:
         f.close()
