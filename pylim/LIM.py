@@ -10,6 +10,7 @@ from numpy.linalg import pinv, matrix_rank, cond
 from scipy.linalg import eig, inv
 from math import ceil
 import tables as tb
+import cPickle as cpk
 
 from Stats import calc_eofs
 import DataTools as Dt
@@ -122,6 +123,7 @@ class LIM(object):
             'calib_data_obj must be an instance of BaseDataObject or subclass.'
 
         self._data_obj = calib_data_obj
+        self._from_precalib = False
         self._calibration = None
         self._wsize = wsize
         self.fcast_times = np.array(fcast_times, dtype=np.int16)
@@ -186,6 +188,31 @@ class LIM(object):
         # E * lambda * E^-1
         return np.dot(evecs, np.dot(evals, inv(evecs))).real
 
+    def save_precalib(self, filename):
+
+        tmp_calib = self._calibration
+        tmp_dobj = self._data_obj
+
+        self._calibration = None
+        self._data_obj = None
+
+        with open(filename, 'w') as f:
+            cpk.dump(self, f)
+
+        print 'Saved pre-calibrated LIM to {}'.format(filename)
+
+        self._calibration = tmp_calib
+        self._data_obj = tmp_dobj
+
+    @staticmethod
+    def from_precalib(filename):
+        with open(filename, 'r') as f:
+            obj = cpk.load(f)
+
+        obj._from_precalib = True
+        return obj
+
+
     def forecast(self, t0_data, use_lag1=True, use_h5=True):
         """Run LIM forecast from given data.
         
@@ -231,6 +258,11 @@ class LIM(object):
         assert t0_data._leading_time, \
             't0_data expects a leading sampling dimension'
 
+        if self._from_precalib and not use_lag1:
+            print ('LIM class created from pre calibrated file. '
+                   'Switching use_lag1 to True due to no _calibration data.')
+            use_lag1 = True
+
         # Calculate anomalies for initial data
         if not t0_data.is_run_mean:
             t0_data.calc_running_mean(self._wsize, shave_yr=True, save=False)
@@ -260,7 +292,6 @@ class LIM(object):
 
         # Calibrate the LIM with (J=neigs) EOFs from training data
         eofs = self._eofs     # eofs is NxJ
-        train_data = np.dot(eofs.T, self._calibration[:].T)    # JxM^
 
         # Project our testing data into eof space
         proj_t0_data = np.dot(eofs.T, forecast_data[:].T)              # JxM^
@@ -281,6 +312,7 @@ class LIM(object):
         # Forecasts using G only    
         else:
             # Training data has to allow for lag of max forecast time
+            train_data = np.dot(eofs.T, self._calibration[:].T)    # JxM^
             train_tdim = train_data.shape[1] - self.fcast_times[-1]*self._wsize
             x0 = train_data[:, 0:train_tdim]
 
