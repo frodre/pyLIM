@@ -391,6 +391,9 @@ class ResampleLIM(LIM):
             directories under the given group
         """
 
+        self._orig_is_run_mean = calib_data_object.is_run_mean
+        self._orig_is_anomaly = calib_data_object.is_anomaly
+
         LIM.__init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs,
                      detrend_data=detrend_data, h5file=h5file)
 
@@ -518,7 +521,9 @@ class ResampleLIM(LIM):
                                 lat_key: lat_dim_coords}
             resample_dat_obj = Dt.BaseDataObject(
                 train_set, dim_coords=train_dim_coords,
-                force_flat=True, save_none=True)
+                force_flat=True, save_none=True,
+                is_anomaly=self._orig_is_anomaly,
+                is_run_mean=self._orig_is_run_mean)
             # use LIM calibration to calculate EOFs
             LIM.set_calibration(self, data_obj=resample_dat_obj)
 
