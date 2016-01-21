@@ -155,6 +155,9 @@ class LIM(object):
         if not data_obj.is_run_mean:
             _, self._bedge, self._tedge = data_obj.calc_running_mean(
                 self._wsize, save=False,  shave_yr=True)
+        else:
+            self._bedge = 0
+            # TODO: set _tedge to something reasonable
 
         if not data_obj.is_anomaly:
             data_obj.calc_anomaly(self._wsize)
