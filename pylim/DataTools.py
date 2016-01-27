@@ -374,15 +374,20 @@ class BaseDataObject(object):
             coords = {BaseDataObject.LAT: f.variables['lat'][:],
                       BaseDataObject.LON: f.variables['lon'][:]}
             times = f.variables['time']
+
+            try:
+                cal = times.calendar
+            except AttributeError:
+                cal = None
             coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units,
-                                                       calendar=times.calendar)
+                                                       calendar=cal)
 
             for i, key in enumerate(data.dimensions):
                 if key in coords.keys():
                     coords[key] = (i, coords[key])
 
             return cls(data[:], dim_coords=coords, force_flat=True,
-                       time_units=times.units, time_cal=times.calendar)
+                       time_units=times.units, time_cal=cal)
 
     @classmethod
     def from_hdf5(cls, filename, var_name, data_dir='/'):
