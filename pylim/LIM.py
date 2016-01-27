@@ -129,7 +129,7 @@ class LIM(object):
         self.fcast_times = np.array(fcast_times, dtype=np.int16)
         self._neigs = fcast_num_pcs
         self._h5file = h5file
-        self._bedge = None
+        self._bedge = 0 
         self._tedge = None
         self._eofs = None
         self._climo = None
