@@ -183,13 +183,14 @@ class LIM(object):
 
     def eig_adjust(self, G):
 
-        evals, evecs = eig(G)
-        evals = np.log(evals)
-        evals += self.eig_bump
-        evals = np.exp(evals)
-
-        # E * lambda * E^-1
-        return np.dot(evecs, np.dot(evals, inv(evecs))).real
+        # evals, evecs = eig(G)
+        # evals = np.log(evals)
+        # evals += self.eig_bump
+        # evals = np.exp(evals)
+        #
+        # # E * lambda * E^-1
+        # return np.dot(evecs, np.dot(evals, inv(evecs))).real
+        return G
 
     def save_precalib(self, filename):
 
