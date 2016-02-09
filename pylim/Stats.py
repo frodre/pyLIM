@@ -83,7 +83,7 @@ def calc_ce(fcast, trial_obs, obs):
     return 1 - evar/cvar
 
 
-def calc_eofs(data, num_eigs, ret_pcs=False):
+def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
     """
     Method to calculate the EOFs of given  dataset.  This assumes data comes in as
     an m x n matrix where m is the temporal dimension and n is the spatial
@@ -110,13 +110,35 @@ def calc_eofs(data, num_eigs, ret_pcs=False):
 
     eofs, svals, pcs = svd(data[:].T, full_matrices=False)
     eofs = eofs[:, :num_eigs]
-    svals = svals[:num_eigs]
+    trunc_svals = svals[:num_eigs]
     pcs = pcs[:num_eigs]
 
+    # variance stats
+    if var_stats_dict is not None:
+        try:
+            nt = pcs.shape[1]
+            ns = eofs.shape[0]
+            eig_vals = (svals**2) / (nt*ns)
+            total_var = eig_vals.sum()
+            var_expl_by_mode = eig_vals / total_var
+            var_expl_by_retained = var_expl_by_mode[0:num_eigs].sum()
+
+            var_stats_dict['nt'] = nt
+            var_stats_dict['ns'] = ns
+            var_stats_dict['eigvals'] = eig_vals
+            var_stats_dict['num_ret_modes'] = num_eigs
+            var_stats_dict['total_var'] = total_var
+            var_stats_dict['var_expl_by_mode'] = var_expl_by_mode
+            var_stats_dict['var_expl_by_ret'] = var_expl_by_retained
+        except TypeError as e:
+            print 'Must past dictionary type to var_stats_dict in order to ' \
+                  'output variance statistics.'
+            print e
+
     if ret_pcs:
-        return eofs, svals, pcs
+        return eofs, trunc_svals, pcs
     else:
-        return eofs, svals
+        return eofs, trunc_svals
 
 
 def calc_lac(fcast, obs):

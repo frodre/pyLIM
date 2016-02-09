@@ -170,7 +170,9 @@ class LIM(object):
             data_obj.detrend_data(save=False)
 
         self._calibration = data_obj.data
-        self._eofs, _ = calc_eofs(self._calibration, self._neigs)
+        self._eof_var_stats = {}
+        self._eofs, _ = calc_eofs(self._calibration, self._neigs,
+                                  var_stats_dict=self._eof_var_stats)
 
         train_data = np.dot(self._eofs.T, self._calibration[:].T)
         tdim = train_data.shape[1] - self._wsize
