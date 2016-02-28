@@ -377,10 +377,11 @@ class BaseDataObject(object):
 
             try:
                 cal = times.calendar
+                coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units,
+                                                           calendar=cal)
             except AttributeError:
-                cal = None
-            coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units,
-                                                       calendar=cal)
+                coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
+                cal=None
 
             for i, key in enumerate(data.dimensions):
                 if key in coords.keys():
