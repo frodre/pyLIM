@@ -6,6 +6,7 @@ Author: Andre Perkins
 
 import tables as tb
 import numpy as np
+from scipy.stats import ttest_1samp
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from mpl_toolkits.basemap import Basemap
@@ -419,16 +420,21 @@ def fcast_corr(h5file, avg_trial=False):
         print 'Calculating Correlation: %i yr fcast' % lead
         if avg_trial:
             # TODO: Significance is currently ignored for avg_trial
+            corr_trials = np.zeros((len(fcasts[i]), len(eofs)))
             for j, trial in enumerate(fcasts[i]):
                 phys_fcast = np.dot(trial.T, eofs[j].T)
                 compiled_obs = build_trial_obs(obs, [test_start_idxs[j]],
                                                lead*yrsize, test_tdim)
-                if j == 0:
-                    corr = St.calc_lac(phys_fcast, compiled_obs)
-                else:
-                    corr += St.calc_lac(phys_fcast, compiled_obs)
 
-            corr /= float(j)
+                corr_trials[j] = St.calc_lac(phys_fcast, compiled_obs)
+                # if j == 0:
+                #     corr = St.calc_lac(phys_fcast, compiled_obs)
+                # else:
+                #     corr += St.calc_lac(phys_fcast, compiled_obs)
+
+            corr = corr_trials.mean(axis=0)
+            ttest, pval = ttest_1samp(corr_trials, 0, axis=0)
+            sig = pval <= 0.05
         else:
             compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
             data = fcasts[i].read()
@@ -437,8 +443,8 @@ def fcast_corr(h5file, avg_trial=False):
             sig, _ = calc_corr_signif(phys_fcast, compiled_obs, corr=corr)
 
         corr_out[i] = corr
-        if not avg_trial:
-            signif_out[i] = sig
+        # if not avg_trial:
+        signif_out[i] = sig
 
     return corr_out, signif_out
     
