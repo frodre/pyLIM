@@ -420,13 +420,14 @@ def fcast_corr(h5file, avg_trial=False):
         print 'Calculating Correlation: %i yr fcast' % lead
         if avg_trial:
             # TODO: Significance is currently ignored for avg_trial
-            corr_trials = np.zeros((len(fcasts[i]), len(eofs)))
+            corr_trials = np.zeros((len(fcasts[i]), eofs.shape[1]))
             for j, trial in enumerate(fcasts[i]):
                 phys_fcast = np.dot(trial.T, eofs[j].T)
                 compiled_obs = build_trial_obs(obs, [test_start_idxs[j]],
                                                lead*yrsize, test_tdim)
 
                 corr_trials[j] = St.calc_lac(phys_fcast, compiled_obs)
+                
                 # if j == 0:
                 #     corr = St.calc_lac(phys_fcast, compiled_obs)
                 # else:
@@ -435,6 +436,7 @@ def fcast_corr(h5file, avg_trial=False):
             corr = corr_trials.mean(axis=0)
             ttest, pval = ttest_1samp(corr_trials, 0, axis=0)
             sig = pval <= 0.05
+            #raise AssertionError
         else:
             compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
             data = fcasts[i].read()
