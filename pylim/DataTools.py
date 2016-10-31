@@ -710,6 +710,20 @@ def posterior_ncf_to_data_obj(filename, var_name, h5file=None):
         f.close()
 
 
+def posterior_npz_to_data_obj(filename):
+    f = np.load(filename)
+
+    data = f['values'][:]
+    lat = f['lat'][:, 0]
+    lon = f['lon'][0, :]
+    coords = {BaseDataObject.LAT: (1, lat),
+              BaseDataObject.LON: (1, lon),
+              BaseDataObject.TIME: (0, f['years'])}
+
+    return BaseDataObject(data, dim_coords=coords, force_flat=True,
+                          is_run_mean=True, is_anomaly=True)
+
+
 def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
     f = ncf.Dataset(infile, 'r')
     outf = tb.open_file(outfile, 'w', filters=tb.Filters(complib='blosc',
