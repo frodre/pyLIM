@@ -131,7 +131,6 @@ class BaseDataObject(object):
         self._flat_spatial_shp = [np.product(self._spatial_shp)]
 
         # Check to see if data input is a compressed version
-        self.is_masked = False
         compressed = False
         if valid_data is not None:
             dim_lim = valid_data.ndim
@@ -161,20 +160,42 @@ class BaseDataObject(object):
 
             self.valid_data = valid_data.flatten()
             self.is_masked = True
-        else:
-            # Check to see if non-finite data requires use of mask
-            if not np.alltrue(np.isfinite(data)):
-                if self._leading_time:
-                    valid_data = np.isfinite(data[0])
-                    for time in data:
-                        valid_data &= np.isfinite(time)
-                    full_valid = np.ones(data.shape, dtype=np.bool) * valid_data
-                    data[~full_valid] = np.nan
-                else:
-                    valid_data = np.isfinite(data)
 
-                self.is_masked = True
-                self.valid_data = valid_data.flatten()
+        # Masked array valid handling
+        elif np.ma.is_masked(data):
+            if self._leading_time:
+                composite_mask = data.mask.sum(axis=0) > 0
+                # broadcast the composite mask across the time dimension
+                data.mask[:] = composite_mask[np.newaxis, :, :]
+                valid_data = np.logical_not(composite_mask)
+            else:
+                valid_data = np.logical_not(data.mask)
+
+            self.valid_data = valid_data.flatten()
+            self.is_masked = True
+
+        # Check to see if non-finite data requires use of mask
+        elif not np.all(np.isfinite(data)):
+            full_valid = np.isfinite(data)
+            full_mask = np.logical_not(full_valid)
+            if self._leading_time:
+                composite_mask = full_mask.sum(axis=0) > 0
+                full_mask[:] = composite_mask[np.newaxis, :, :]
+                mask = full_mask
+                # Data converted to masked array
+                valid_data = np.logical_not(composite_mask.flatten())
+            else:
+                valid_data = full_valid.flatten()
+                mask = np.logical_not(valid_data)
+
+            data = np.ma.array(data, mask=mask)
+            self.is_masked = True
+            self.valid_data = valid_data.flatten()
+
+        # Data is not masked or compressed
+        else:
+            self.valid_data = None
+            self.is_masked = False
 
         self.data = data
         self._curr_data_key = self._ORIGDATA
@@ -196,13 +217,15 @@ class BaseDataObject(object):
                 self.compressed_data = self.orig_data
             elif self.is_masked:
                 if self._leading_time:
-                    self.data = self.data[:, self.valid_data]
+                    self.data = np.compress(self.valid_data,
+                                            self.data,
+                                            axis=1)
                     if not save_none:
                         self.compressed_data = self._new_databin(
                             self.data,
                             self._COMPRESSED)
                 else:
-                    self.data = self.data[self.valid_data]
+                    self.data = self.data.compressed()
                     if not save_none:
                         self.compressed_data = self._new_databin(
                             self.data,
