@@ -235,6 +235,46 @@ def test_basedataobj_nanentry_leadtime():
                                   obj.inflate_full_grid(reshape_orig=True))
 
 
+def test_basedataobj_masked_noleadtime():
+    data = np.arange(24).reshape(3, 4, 2).astype(np.float32)
+    mask = np.zeros_like(data, dtype=np.bool)
+    mask[2, 3, 1] = True
+    data = np.ma.array(data, mask=mask)
+    obj = BDO(data)
+    assert obj.is_masked
+    np.testing.assert_array_equal(data.flatten(), obj.orig_data)
+    assert np.array_equal(data.flatten()[:-1], obj.compressed_data)
+    assert np.array_equal(data.flatten()[:-1], obj.data)
+    np.testing.assert_array_equal(data,
+                                  obj.inflate_full_grid(reshape_orig=True),
+                                  err_msg='Inflation to full grid failed.')
+
+
+def test_basedataobj_masked_leadtime():
+    data = np.arange(24).reshape(3, 2, 2, 2).astype(np.float32)
+    mask = np.zeros_like(data, dtype=np.bool)
+    mask[1, 0, 0, 1] = True
+    mask[2, 1, 1, 1] = True
+    data = np.ma.array(data, mask=mask)
+    dim = {BDO.TIME: (0, [1, 2, 3])}
+
+    valid = np.logical_not(data.mask)
+    valid_composite = valid.sum(axis=0) == data.shape[0]
+    full_valid = np.ones_like(data, dtype=np.bool) * valid_composite
+    flat_data = data.data.reshape(3, -1)
+    compressed_data = np.compress(valid_composite.flatten(), flat_data, axis=1)
+
+    obj = BDO(data, dim_coords=dim)
+    assert obj._leading_time
+    assert obj.is_masked
+    assert obj.data.size == 18  # remove entire nan loc from entire sample
+    assert np.array_equal(obj.data, compressed_data)
+
+    data[~full_valid] = np.nan
+    np.testing.assert_array_equal(data.filled(np.nan),
+                                  obj.inflate_full_grid(reshape_orig=True))
+
+
 def test_basedataobj_compressed_noleadtime():
     data = np.arange(24).reshape(3, 4, 2).astype(np.float32)
     data[2, 3, 1] = np.nan
