@@ -96,7 +96,7 @@ class LIM(object):
     """
 
     def __init__(self, calib_data_obj, wsize, fcast_times, fcast_num_pcs,
-                 detrend_data=False, h5file=None, L_eig_bump=None):
+                 detrend_data=False, h5file=None):
         """
         Parameters
         ----------
@@ -135,7 +135,6 @@ class LIM(object):
         self._climo = None
         self._detrend_data = detrend_data
         self.G_1 = None
-        self.eig_bump = L_eig_bump
 
         self.set_calibration()
 
@@ -179,20 +178,6 @@ class LIM(object):
         x0 = train_data[:, 0:tdim]
         x1 = train_data[:, self._wsize:]
         self.G_1 = _calc_m(x0, x1)
-
-        if self.eig_bump is not None:
-            self.G_1 = self.eig_adjust(self.G_1)
-
-    def eig_adjust(self, G):
-
-        # evals, evecs = eig(G)
-        # evals = np.log(evals)
-        # evals += self.eig_bump
-        # evals = np.exp(evals)
-        #
-        # # E * lambda * E^-1
-        # return np.dot(evecs, np.dot(evals, inv(evecs))).real
-        return G
 
     def save_precalib(self, filename):
 
