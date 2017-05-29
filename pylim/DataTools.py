@@ -390,7 +390,7 @@ class BaseDataObject(object):
         self._dim_coords[self.TIME] = (tmp_dimcoord[0], tmp_time)
 
     @classmethod
-    def from_netcdf(cls, filename, var_name):
+    def from_netcdf(cls, filename, var_name, **kwargs):
 
         with ncf.Dataset(filename, 'r') as f:
             data = f.variables[var_name]
@@ -410,8 +410,9 @@ class BaseDataObject(object):
                 if key in coords.keys():
                     coords[key] = (i, coords[key])
 
-            return cls(data[:], dim_coords=coords, force_flat=True,
-                       time_units=times.units, time_cal=cal)
+            force_flat = kwargs.pop('force_flat', True)
+            return cls(data[:], dim_coords=coords, force_flat=force_flat,
+                       time_units=times.units, time_cal=cal, **kwargs)
 
     @classmethod
     def from_hdf5(cls, filename, var_name, data_dir='/'):
