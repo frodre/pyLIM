@@ -376,6 +376,9 @@ class BaseDataObject(object):
 
         return self.data
 
+    def is_leading_time(self):
+        return self._leading_time
+
     def save_dataobj_pckl(self, filename):
 
         tmp_dimcoord = self._dim_coords[self.TIME]

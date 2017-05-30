@@ -6,24 +6,21 @@ Author: Andre Perkins
 """
 
 import numpy as np
-from numpy.linalg import pinv, matrix_rank, cond
-from scipy.linalg import eig, inv
+from numpy.linalg import pinv, cond, eigvals
 from math import ceil
 import tables as tb
 import cPickle as cpk
+import logging
+import time
 
 from Stats import calc_eofs
 import DataTools as Dt
 
 
-def _area_wgt(data, lats):
-    """Apply area weighting to data based on provided latitude values."""
-    assert(data.shape[-1] == lats.shape[-1])
-    scale = np.sqrt(np.cos(np.radians(lats)))
-    return data * scale
+logger = logging.getLogger(__name__)
 
 
-def _calc_m(x0, xt):
+def _calc_m(x0, xt, tau=1):
     """Calculate either L or G for forecasting (using nomenclature
     from Newman 2013"""
     
@@ -34,17 +31,23 @@ def _calc_m(x0, xt):
     x0x0 = np.dot(x0, x0.T)
     x0xt = np.dot(xt, x0.T)
 
-    # print 'Matrix Ranks...
-    # print 'C(0): ', matrix_rank(x0x0)
-    # print 'C(1): ', matrix_rank(x0xt)
-    # print 'inv(C(0)) ', matrix_rank(pinv(x0x0))
-    # print 'C(1)*C(0)^-1: ', matrix_rank(dot(x0xt, pinv(x0x0)))
+    # Calculate the mapping term G_tau
+    G = np.dot(x0xt, pinv(x0x0))
 
-    # print 'Condition number'
-    # print 'C(0): ', cond(x0x0)
-    
-    # Calculate tau-lag G value
-    return np.dot(x0xt, pinv(x0x0))
+    # Calculate the forcing matrix to check that all modes are damped
+    L = (1/tau) * np.log(G)
+    Leigs = eigvals(L)
+
+    if np.any(Leigs.real >= 0):
+        logger.debug('L eigenvalues: \n' + str(Leigs))
+        raise ValueError('Positive eigenvalues detected in forecast matrix L.')
+
+    if cond(x0x0) > 20:
+        logger.warn(('C_0 condition number is large ({:2.2f}). Too many '
+                     'features (or EOFs) are likely provided and further '
+                     'truncation is suggested.'))
+
+    return G
 
 
 def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
@@ -80,7 +83,7 @@ class LIM(object):
     
     Notes
     -----
-    It's based on the LIM described by M. Newman (2013) [1].  Right now it
+    Based on the LIM described by M. Newman (2013) [1].  Right now it
     assumes the use of monthly data (i.e. each timestep should represent a
     single month).
     
@@ -89,111 +92,65 @@ class LIM(object):
     .. [1] Newman, M. (2013), An Empirical Benchmark for Decadal Forecasts of 
        Global Surface Temperature Anomalies, J. Clim., 26(14), 5260–5269, 
        doi:10.1175/JCLI-D-12-00590.1.
-       
-    Examples
-    --------
     ....
     """
 
-    def __init__(self, calib_data_obj, wsize, fcast_times, fcast_num_pcs,
-                 detrend_data=False, h5file=None):
+    def __init__(self, calib_data, fcast_components, nelem_in_tau1, h5file=None):
         """
         Parameters
         ----------
-        calib_data_object: DataTools.BaseDataObject or subclass
-            Dataset for determining LIM forecast EOFs.  DataInput provids
-            a 2D MxN matrix where M (rows) represent temporal samples and
-            N(columns) represent spatial samples.  It handles data with
-            nan masking.  Note: If data is masked, saved output spatial
-            dimensions will be reduced to valid data.
-        wsize: int
-            Windowsize for running mean.  For this implementation it should
-            be equal to a year's worth of samples
-        fcast_times: array_like
-            1D array-like object containing all times to forecast at with the
-            LIM. Times should be in wsize units. i.e. 1yr forecast should
-            be integer value "1" not 12 (if wsize=12).
-        fcast_num_pcs: int
+        calib_data: ndarray
+            Data for calibrating the LIM.  Expects
+            a 2D MxN matrix where M (rows) represent the sampling dimension and
+            N(columns) represents the feature dimension (e.g. spatial grid
+            points).
+        fcast_components: int
             Number of principal components to include in forecast calculations
-        H5file: HDF5_Object, Optional
+        nelem_in_tau1: int
+            Number of time samples that span tau=1.  E.g. for monthly data when
+            a forecast tau is equivalent to 1 year, nelem_in_tau should be 12.
+        h5file: HDF5_Object, Optional
             File object to store LIM output.  It will create a series of
             directories under the given group
         """
-        assert isinstance(calib_data_obj, Dt.BaseDataObject), \
-            'calib_data_obj must be an instance of BaseDataObject or subclass.'
+        logger.info('Initializing LIM forecasting object...')
 
-        self._data_obj = calib_data_obj
-        self._from_precalib = False
-        self._calibration = None
-        self._wsize = wsize
-        self.fcast_times = np.array(fcast_times, dtype=np.int16)
-        self._neigs = fcast_num_pcs
+        if calib_data.ndim != 2:
+            logger.error(('LIM calibration data is not 2D '
+                          '(Contained ndim={:d}').format(calib_data.ndim))
+            raise ValueError('Input LIM calibration data is not 2D')
+
         self._h5file = h5file
-        self._bedge = 0 
-        self._tedge = None
-        self._eofs = None
-        self._climo = None
-        self._detrend_data = detrend_data
-        self.G_1 = None
-
-        self.set_calibration()
-
-    def set_calibration(self, data_obj=None):
-        if data_obj is not None:
-            assert isinstance(data_obj, Dt.BaseDataObject), \
-                'data_obj must be an instance of BaseDataObject or'\
-                'its subclass.'
-        else:
-            data_obj = self._data_obj
-
-        assert data_obj.forced_flat or data_obj.is_masked, \
-            'data_obj expects flattened spatial dimension'
-        assert data_obj._leading_time, \
-            'data_obj expects a leading sampling dimension'
-
-        if not data_obj.is_run_mean:
-            _, self._bedge, self._tedge = data_obj.calc_running_mean(
-                self._wsize, save=False,  shave_yr=True)
-        else:
-            self._bedge = 0
-            # TODO: set _tedge to something reasonable
-
-        if not data_obj.is_anomaly:
-            data_obj.calc_anomaly(self._wsize)
-            self._climo = data_obj.climo[:]
-
-        if not data_obj.is_area_weighted:
-            data_obj.area_weight_data(save=False)
-
-        if self._detrend_data and not data_obj.is_detrended:
-            data_obj.detrend_data(save=False)
-
-        self._calibration = data_obj.data
+        self._from_precalib = False
+        self._neigs = fcast_components
+        self._nelem_in_tau1 = nelem_in_tau1
         self._eof_var_stats = {}
-        self._eofs, _ = calc_eofs(self._calibration, self._neigs,
-                                  var_stats_dict=self._eof_var_stats)
 
-        train_data = np.dot(self._eofs.T, self._calibration[:].T)
-        tdim = train_data.shape[1] - self._wsize
-        x0 = train_data[:, 0:tdim]
-        x1 = train_data[:, self._wsize:]
-        self.G_1 = _calc_m(x0, x1)
+        logger.info('Calculating EOFs on calibration data.')
+        stime = time.time()
+        self._eofs = calc_eofs(calib_data, fcast_components,
+                               var_stats_dict=self._eof_var_stats)
+        train_data = np.dot(self._eofs.T, calib_data.T)
+        etime = time.time() - stime
+        logger.info('EOF truncation finished in {:2.2f}s'.format(etime))
+
+        logger.debug(('\nEOF statistics:\n'
+                      'Total variance: {:2.4e}\n'
+                      'Var explained (ret modes): {:2.4e}'
+                      ).format(self._eof_var_stats['total_var'],
+                               self._eof_var_stats['var_expl_by_ret']))
+
+        x0 = train_data[:, 0:-nelem_in_tau1]
+        x1 = train_data[:, nelem_in_tau1:]
+
+        self.G_1 = _calc_m(x0, x1, tau=1)
 
     def save_precalib(self, filename):
-
-        tmp_calib = self._calibration
-        tmp_dobj = self._data_obj
-
-        self._calibration = None
-        self._data_obj = None
 
         with open(filename, 'w') as f:
             cpk.dump(self, f)
 
         print 'Saved pre-calibrated LIM to {}'.format(filename)
-
-        self._calibration = tmp_calib
-        self._data_obj = tmp_dobj
 
     @staticmethod
     def from_precalib(filename):
@@ -203,9 +160,8 @@ class LIM(object):
         obj._from_precalib = True
         return obj
 
-
-    def forecast(self, t0_data, use_lag1=True, use_h5=True):
-        """Run LIM forecast from given data.
+    def forecast(self, t0_data, fcast_leads, use_h5=True):
+        """Forecast on provided data.
         
         Performs LIM forecast over the times specified by the
         fcast_times class attribute.  Forecast can be performed by calculating
@@ -214,14 +170,14 @@ class LIM(object):
         
         Parameters
         ----------
-        t0_data: DataTools.BaseDataObject or subclass
-            Data to forecast from.  Expects leading sample dimension with a
-            flattened spatial dimension.  1-window length chunk is removed from
-            each edge from the anomaly calculation procedure.  M^ = M - 2*wsize
-        use_lag1: bool
-            Flag for using only the G_1-matrix for forecasting
-        detrend_data: bool
-            Apply linear detrending to anomaly timeseries data
+        t0_data: ndarray
+            Data to forecast from.  Expects
+            a 2D MxN matrix where M (rows) represent the sampling dimension and
+            N(columns) represents the feature dimension (e.g. spatial grid
+            points).
+        fcast_leads: List<int>
+            A list of forecast lead times.  Each value is interpreted as a
+            tau value, for which the forecast matrix is determined as G_1^tau.
         use_h5: bool
             Use H5file to store forecast data instead of an ndarray.
 
@@ -235,49 +191,29 @@ class LIM(object):
             EOFs for converting forecast output between EOF and physical
             space.  Returned in an NxJ matrix.
 
-            
-        Notes
-        -----
-        This method will set the fcast_out attribute for the LIM. If an HDF5
-        obj is provided it will output the forecast to this file if desired.
         """
 
-        assert isinstance(t0_data, Dt.BaseDataObject), \
-            't0_data must be an instance of BaseDataObject or subclass.'
-        assert t0_data.forced_flat or t0_data.is_masked, \
-            't0_data expects flattened spatial dimension'
-        assert t0_data._leading_time, \
-            't0_data expects a leading sampling dimension'
+        if t0_data.ndim != 2:
+            logger.error(('LIM forecast data is not 2D '
+                          '(Contained ndim={:d}').format(t0_data.ndim))
+            raise ValueError('Input LIM forecast data is not 2D')
 
-        if self._from_precalib and not use_lag1:
-            print ('LIM class created from pre calibrated file. '
-                   'Switching use_lag1 to True due to no _calibration data.')
-            use_lag1 = True
+        logger.info('Performing LIM forecast for tau values: '
+                    + str(fcast_leads))
 
-        # Calculate anomalies for initial data
-        if not t0_data.is_run_mean:
-            t0_data.calc_running_mean(self._wsize, shave_yr=True, save=False)
-        if not t0_data.is_anomaly:
-            t0_data.calc_anomaly(self._wsize, save=False, climo=self._climo)
-
-        if self._detrend_data and not t0_data.is_detrended:
-            t0_data.detrend_data(save=False)
-
-        forecast_data = t0_data.data
+        num_fcast_times = len(fcast_leads)
 
         # Create output locations for our forecasts
-        fcast_out_shp = [len(self.fcast_times), self._neigs,
-                         forecast_data.shape[0]]
+        fcast_out_shp = (num_fcast_times, self._neigs, t0_data.shape[0])
 
         if self._h5file is not None and use_h5:
-            h5f = self._h5file
             # Create forecast groups
-            fcast_out = _create_h5_fcast_grps(h5f,
+            fcast_out = _create_h5_fcast_grps(self._h5file,
                                               '/data/fcast_bin',
                                               tb.Atom.from_dtype(
                                                   t0_data.data_dtype),
                                               fcast_out_shp[1:],
-                                              self.fcast_times)
+                                              fcast_leads)
         else:
             fcast_out = np.zeros(fcast_out_shp)
 
@@ -285,44 +221,19 @@ class LIM(object):
         eofs = self._eofs     # eofs is NxJ
 
         # Project our testing data into eof space
-        proj_t0_data = np.dot(eofs.T, forecast_data[:].T)              # JxM^
+        proj_t0_data = np.dot(eofs.T, t0_data[:].T)              # JxM^
 
-        # Forecasts using L to determine G-values
-        if use_lag1:
-            # Calculate L from time-lag of one window size (1-year for our LIM)
-
-            g_1 = self.G_1
-            for i, tau in enumerate(self.fcast_times):
-                g = g_1**tau
-                xf = np.dot(g, proj_t0_data)
-                if use_h5:
-                    fcast_out[i][:] = xf
-                else:
-                    fcast_out[i] = xf
-
-        # Forecasts using G only    
-        else:
-            # Training data has to allow for lag of max forecast time
-            train_data = np.dot(eofs.T, self._calibration[:].T)    # JxM^
-            train_tdim = train_data.shape[1] - self.fcast_times[-1]*self._wsize
-            x0 = train_data[:, 0:train_tdim]
-
-            for i, tau in enumerate(self.fcast_times*self._wsize):
-                xt = train_data[:, tau:(train_tdim+tau)]
-                g = _calc_m(x0, xt)
-
-                if self.eig_bump is not None:
-                    g = self.eig_adjust(g)
-
-                xf = np.dot(g, proj_t0_data)
-                if use_h5:
-                    fcast_out[i][:] = xf
-                else:
-                    fcast_out[i] = xf
+        for i, tau in enumerate(fcast_leads):
+            g = self.G_1**tau
+            xf = np.dot(g, proj_t0_data)
+            if use_h5:
+                fcast_out[i][:] = xf
+            else:
+                fcast_out[i] = xf
 
         # Save EOFs to HDF5 file if needed
         if self._h5file is not None and use_h5:
-            eof_out = Dt.var_to_hdf5_carray(h5f, '/data', 'eofs', eofs)
+            eof_out = Dt.var_to_hdf5_carray(self._h5file, '/data', 'eofs', eofs)
         else:
             eof_out = eofs
 
@@ -339,7 +250,7 @@ class ResampleLIM(LIM):
     See the LIM Class docstring for references.
     """
 
-    def __init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs,
+    def __init__(self, calib_data_object, wsize, fcast_times, fcast_components,
                  hold_chk_pct, num_trials, detrend_data=False, h5file=None):
         """
         Parameters
@@ -363,7 +274,7 @@ class ResampleLIM(LIM):
             1D array-like object containing all times to forecast at with the
             LIM. Times should be in wsize units. i.e. 1yr forecast should
             be integer value "1" not 12 (if wsize=12).
-        fcast_num_pcs: int
+        fcast_components: int
             Number of principal components to include in forecast calculations
         hold_chk_pc: float
             The percentage of data to withhold during each trial of the
@@ -379,10 +290,13 @@ class ResampleLIM(LIM):
             directories under the given group
         """
 
+        raise NotImplementedError('Updates to the base LIM class have broken '
+                                  'this.')
+
         self._orig_is_run_mean = calib_data_object.is_run_mean
         self._orig_is_anomaly = calib_data_object.is_anomaly
 
-        LIM.__init__(self, calib_data_object, wsize, fcast_times, fcast_num_pcs,
+        LIM.__init__(self, calib_data_object, wsize, fcast_times, fcast_components,
                      detrend_data=detrend_data, h5file=h5file)
 
         # Need original input dataset for resampling
@@ -407,6 +321,48 @@ class ResampleLIM(LIM):
 
         # Calculate edge concatenation lengths for anomaly procedure
         self._anom_edges = [self._bedge, self._tedge]
+
+    # TODO: Placed here to aid in figuring out resampled LIM
+    # def set_calibration(self, data_obj=None):
+    #     if data_obj is not None:
+    #         assert isinstance(data_obj, Dt.BaseDataObject), \
+    #             'data_obj must be an instance of BaseDataObject or'\
+    #             'its subclass.'
+    #     else:
+    #         data_obj = self._data_obj
+    #
+    #     assert data_obj.forced_flat or data_obj.is_masked, \
+    #         'data_obj expects flattened spatial dimension'
+    #     assert data_obj._leading_time, \
+    #         'data_obj expects a leading sampling dimension'
+    #
+    #     if not data_obj.is_run_mean:
+    #         _, self._bedge, self._tedge = data_obj.calc_running_mean(
+    #             self._wsize, save=False,  shave_yr=True)
+    #     else:
+    #         self._bedge = 0
+    #         # TODO: set _tedge to something reasonable
+    #
+    #     if not data_obj.is_anomaly:
+    #         data_obj.calc_anomaly(self._wsize)
+    #         self._climo = data_obj.climo[:]
+    #
+    #     if not data_obj.is_area_weighted:
+    #         data_obj.area_weight_data(save=False)
+    #
+    #     if self._detrend_data and not data_obj.is_detrended:
+    #         data_obj.detrend_data(save=False)
+    #
+    #     self._calibration = data_obj.data
+    #     self._eof_var_stats = {}
+    #     self._eofs, _ = calc_eofs(self._calibration, self._neigs,
+    #                               var_stats_dict=self._eof_var_stats)
+    #
+    #     train_data = np.dot(self._eofs.T, self._calibration[:].T)
+    #     tdim = train_data.shape[1] - self._wsize
+    #     x0 = train_data[:, 0:tdim]
+    #     x1 = train_data[:, self._wsize:]
+    #     self.G_1 = _calc_m(x0, x1)
 
     def forecast(self, use_lag1=True):
         """Run LIM forecast using resampling
