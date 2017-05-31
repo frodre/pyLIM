@@ -572,7 +572,7 @@ class Hdf5DataObject(BaseDataObject):
 
         with tb.open_file(filename, 'r') as f:
 
-            data = f.get_node(data_dir, name=var_name)[:]
+            data = f.get_node(data_dir, name=var_name)
             lat = f.get_node(data_dir+'lat')
             lon = f.get_node(data_dir+'lon')
             coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
@@ -761,8 +761,13 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
         atom = tb.Atom.from_dtype(data.datatype)
         shape = data.shape
         out = empty_hdf5_carray(outf, data_dir, var_name, atom, shape)
-        for i, chunk in enumerate(data):
-                out[i] = chunk
+
+        spatial_nbytes = np.product(data.shape[1:])*data.dtype.itemsize
+        tchunk_8mb = 8*1024**2 / spatial_nbytes
+
+
+        for k in xrange(0, shape[0], tchunk_8mb):
+                out[k:k+tchunk_8mb] = data[k:k+tchunk_8mb]
 
         lat = var_to_hdf5_carray(outf, data_dir, 'lat',
                                  f.variables['lat'][:])
