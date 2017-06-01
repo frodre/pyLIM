@@ -5,6 +5,7 @@ Author: Andre Perkins
 """
 
 import tables as tb
+import dask.array as da
 import numpy as np
 import os.path as path
 import warnings

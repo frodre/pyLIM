@@ -47,8 +47,13 @@ def calc_anomaly(data, yrsize, climo=None):
     if climo is None:
         climo = data.mean(axis=0)
 
-    # anomaly = data[:].reshape(new_shp) - climo
-    anomaly = ne.evaluate('data - climo')
+    if hasattr(data, 'dask'):
+        climo.compute()
+        anomaly = data - climo
+        anomaly.compute()
+    else:
+        # anomaly = data[:].reshape(new_shp) - climo
+        anomaly = ne.evaluate('data - climo')
 
     return anomaly.reshape(old_shp), climo
 
@@ -244,7 +249,7 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
     top_edge: int
         Number of elements removed from the ending of the time series
     """
-    
+
     dshape = data.shape
     assert(dshape[0] >= window_size), ("Window size must be smaller than or "
                                        "equal to the length of the time "
@@ -262,15 +267,15 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
     tot_cut = cut_from_top + cut_from_bot
     new_shape = list(dshape)
     new_shape[0] -= tot_cut
-    
+
     assert(new_shape[0] > 0), ("Not enough data to trim partial years from "
                                "edges.  Please try with shaveYr=False")
 
     # Allocate memory and perform running mean
     result = np.zeros(new_shape, dtype=data.dtype)
-        
+
     for i in xrange(new_shape[0]):
         cntr = cut_from_bot - bedge + i
         result[i] = (data[cntr:(cntr+window_size)].mean(axis=0))
-    
+
     return result, cut_from_bot, cut_from_top
