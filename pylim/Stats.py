@@ -291,6 +291,7 @@ def run_mean(data, window_size, trim_edge=None, output_arr=None):
         def _run_mean_block(block):
             return convolve1d(block, weights, axis=0)
 
+        old_chunk_shape = data
         pad = window_size // 2
         ghost = da.ghost.ghost(data, depth={0: pad}, boundary={0: 'reflect'})
         filt = ghost.map_blocks(_run_mean_block, window_size)

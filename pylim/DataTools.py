@@ -650,6 +650,18 @@ class Hdf5DataObject(BaseDataObject):
         da.store(compressed_data, out_arr)
         return out_arr
 
+    def calc_running_mean(self, window_size, year_len, save=True):
+
+        if self._leading_time:
+            orig = self._chunk_shape
+            new_chunk = tuple([window_size*50] + list(orig[1:]))
+            self.data.rechunk(new_chunk)
+
+        res = super(Hdf5DataObject, self).calc_running_mean(window_size,
+                                                            year_len,
+                                                            save=save)
+
+        return res.rechunk(orig)
 
     def set_databin_grp(self, group):
         """
