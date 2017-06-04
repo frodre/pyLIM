@@ -61,16 +61,10 @@ def calc_anomaly(data, yrsize, climo=None, output_arr=None):
             raise ValueError('calc_anomaly requires an output array keyword '
                              'argument when operating on a Dask array.')
 
-        out_climo = climo.compute()
-
-        # Need to stack along subannual to subtract (manual broadcast)
-        if yrsize != 1:
-            concat_climo = [climo for _ in xrange(data.shape[0])]
-            climo = da.concatenate(concat_climo, axis=0)
-
-        data = data.reshape(old_shp)
         anomaly = data - climo
-        da.store(anomaly, output_arr)
+        old_shp_anom = anomaly.reshape(old_shp)
+        da.store(old_shp_anom, output_arr)
+        out_climo = climo.compute()
     else:
         if output_arr is not None:
             output_arr[:] = ne.evaluate('data - climo')

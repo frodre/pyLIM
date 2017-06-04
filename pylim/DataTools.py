@@ -322,13 +322,11 @@ class BaseDataObject(object):
                                                    self.data.dtype,
                                                    self._ANOMALY)
 
-        self.data, climo = calc_anomaly(self.data, yr_size,
-                                        climo=climo,
-                                        output_arr=self.anomaly)
+        self.data, self.climo = calc_anomaly(self.data, yr_size,
+                                             climo=climo,
+                                             output_arr=self.anomaly)
 
-        self.climo = climo
-        self._curr_data_key = self._ANOMALY
-        self.is_anomaly = True
+        self._set_curr_data_key(self._ANOMALY)
         return self.anomaly
 
     def detrend_data(self, save=True):
