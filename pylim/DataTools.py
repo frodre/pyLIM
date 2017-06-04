@@ -17,6 +17,8 @@ import cPickle as cpk
 from Stats import run_mean, calc_anomaly
 from scipy.signal import detrend
 
+tb.parameters.NODE_CACHE_SLOTS = 0
+
 
 class BaseDataObject(object):
     """Data Input Object
@@ -57,8 +59,7 @@ class BaseDataObject(object):
 
     def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
                  save_none=False, time_units=None, time_cal=None,
-                 is_anomaly=False, is_run_mean=False, is_detrended=False,
-                 is_area_weighted=False):
+                 fill_value=None):
         """
         Construction of a DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -79,12 +80,9 @@ class BaseDataObject(object):
             greater than or equal to the spatial dimensions of data.
         force_flat: bool
             Force spatial dimensions to be flattened (1D array)
-        is_anomaly: bool
-            Data is already in anomaly form.
-        is_run_mean: bool
-            Data has been smoothed with a running mean.
-        is_detrended: bool
-            Data has been detrended.
+        fill_value: float
+            Value to be considered invalid data during the mask and 
+            compression. Only considered when data is not masked.
         """
 
         assert data.ndim <= 4, 'Maximum of 4 dimensions are allowed.'
@@ -93,20 +91,19 @@ class BaseDataObject(object):
         self.forced_flat = force_flat
         self.time_units = time_units
         self.time_cal = time_cal
+        self._fill_value = fill_value
         self._save_none = save_none
         self._data_bins = {}
         self._curr_data_key = None
+        self._ops_performed = []
 
         # Future possible data manipulation functionality
         self.anomaly = None
         self.climo = None
-        self.is_anomaly = is_anomaly
+        self.compressed_data = None
         self.running_mean = None
-        self.is_run_mean = is_run_mean
         self.detrended = None
-        self.is_detrended = is_detrended
         self.area_weighted = None
-        self.is_area_weighted = is_area_weighted
 
         # Match dimension coordinate vectors
         if dim_coords is not None:
@@ -163,43 +160,11 @@ class BaseDataObject(object):
             self.is_masked = True
 
         # Masked array valid handling
-        elif np.ma.is_masked(data):
-            if self._leading_time:
-                composite_mask = data.mask.sum(axis=0) > 0
-                # broadcast the composite mask across the time dimension
-                data.mask[:] = composite_mask[np.newaxis, :, :]
-                valid_data = np.logical_not(composite_mask)
-            else:
-                valid_data = np.logical_not(data.mask)
+        self.is_masked, self.valid_data = self._data_masking(data)
+        if self.valid_data is not None:
+            self.valid_data = self.valid_data.flatten()
+            self.mask = np.logical_not(self.valid_data)
 
-            self.valid_data = valid_data.flatten()
-            self.is_masked = True
-
-        # Check to see if non-finite data requires use of mask
-        elif not np.all(np.isfinite(data)):
-            full_valid = np.isfinite(data)
-            full_mask = np.logical_not(full_valid)
-            if self._leading_time:
-                composite_mask = full_mask.sum(axis=0) > 0
-                full_mask[:] = composite_mask[np.newaxis, :, :]
-                mask = full_mask
-                # Data converted to masked array
-                valid_data = np.logical_not(composite_mask.flatten())
-            else:
-                valid_data = full_valid.flatten()
-                mask = np.logical_not(valid_data)
-
-            data = np.ma.array(data, mask=mask)
-            self.is_masked = True
-            self.valid_data = valid_data.flatten()
-
-        # Data is not masked or compressed
-        else:
-            self.valid_data = None
-            self.is_masked = False
-
-        self.data = data
-        self._curr_data_key = self._ORIGDATA
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
             if self._leading_time:
@@ -207,40 +172,95 @@ class BaseDataObject(object):
                                          self._flat_spatial_shp)
             else:
                 self.data = data.reshape(self._flat_spatial_shp)
+        else:
+            self.data = data
 
         # Initialized here for flattening purposes
         if not save_none:
             self.orig_data = self._new_databin(self.data, self._ORIGDATA)
+        self._set_curr_data_key(self._ORIGDATA)
 
         # Compress the data if mask is present
-        if compressed or self.is_masked:
-            if compressed:
-                self.compressed_data = self.orig_data
-            elif self.is_masked:
+        if compressed:
+            self.compressed_data = self.orig_data
+        elif self.is_masked:
+            if not save_none:
                 if self._leading_time:
-                    self.data = np.compress(self.valid_data,
-                                            self.data,
-                                            axis=1)
-                    if not save_none:
-                        self.compressed_data = self._new_databin(
-                            self.data,
-                            self._COMPRESSED)
+                    new_shp = (self._time_shp[0], self.valid_data.sum())
                 else:
-                    self.data = self.data.compressed()
-                    if not save_none:
-                        self.compressed_data = self._new_databin(
-                            self.data,
-                            self._COMPRESSED)
-            self._curr_data_key = self._COMPRESSED
-        else:
-            self.compressed_data = None
+                    new_shp = (self.valid_data.sum(),)
+                self.compressed_data = self._new_empty_databin(new_shp,
+                                                               self.data.dtype,
+                                                               self._COMPRESSED)
 
-    # Create data backend container
+            self.data = self._compress_masked_data(self.data,
+                                                   self.mask,
+                                                   out_arr=self.compressed_data)
+            self._set_curr_data_key(self._COMPRESSED)
+
+    def _set_curr_data_key(self, key):
+        self._curr_data_key = key
+
+    def _new_empty_databin(self, shape, dtype, name):
+        """
+        Create an empty backend data container.
+        """
+        new = np.empty(shape, dtype=dtype)
+        self._data_bins[name] = new
+        return new
+
     def _new_databin(self, data, name):
+        """
+        Create and copy data into a new backend data container.
+        """
         new = np.empty_like(data)
         new[:] = data
         self._data_bins[name] = new
         return new
+
+    def _gen_composite_mask(self, data):
+        if self._leading_time:
+            composite_mask = data.mask.sum(axis=0) > 0
+        else:
+            composite_mask = data.mask
+
+        return composite_mask
+
+    def _check_invalid_data(self, data):
+        full_valid = np.isfinite(data)
+        if self._fill_value is not None:
+            full_valid &= data != self._fill_value
+
+        if not np.all(full_valid):
+            masked = True
+            if self._leading_time:
+                valid_data = full_valid.sum() < self._time_shp[0]
+            else:
+                valid_data = full_valid
+        else:
+            masked = False
+            valid_data = None
+
+        return masked, valid_data
+
+    def _data_masking(self, data):
+        if np.ma.is_masked(data[0]):
+            masked = True
+            composite_mask = self._gen_composite_mask(data)
+            valid_data = np.logical_not(composite_mask)
+        else:
+            masked, valid_data = self._check_invalid_data(data)
+
+        return masked, valid_data
+
+    def _compress_masked_data(self, data, mask, out_arr=None):
+        if self._leading_time:
+            compress_axis=1
+        else:
+            compress_axis=None
+
+        out_arr = np.compress(mask, data, axis=compress_axis, out=out_arr)
+        return out_arr
 
     def inflate_full_grid(self, data=None, reshape_orig=False):
         """
@@ -296,10 +316,16 @@ class BaseDataObject(object):
     def calc_anomaly(self, yr_size, save=True, climo=None):
         assert self._leading_time, 'Can only perform anomaly calculation with '\
             'a specified leading sampling dimension'
-        self.data, climo = calc_anomaly(self.data, yr_size, climo=climo)
 
         if save and not self._save_none:
-            self.anomaly = self._new_databin(self.data, self._ANOMALY)
+            self.anomaly = self._new_empty_databin(self.data.shape,
+                                                   self.data.dtype,
+                                                   self._ANOMALY)
+
+        self.data, climo = calc_anomaly(self.data, yr_size,
+                                        climo=climo,
+                                        output_arr=self.anomaly)
+
         self.climo = climo
         self._curr_data_key = self._ANOMALY
         self.is_anomaly = True
@@ -397,7 +423,7 @@ class BaseDataObject(object):
     def from_netcdf(cls, filename, var_name, **kwargs):
 
         with ncf.Dataset(filename, 'r') as f:
-            data = f.variables[var_name]
+            data = f.variables[var_name][:]
             coords = {BaseDataObject.LAT: f.variables['lat'][:],
                       BaseDataObject.LON: f.variables['lon'][:]}
             times = f.variables['time']
@@ -415,7 +441,7 @@ class BaseDataObject(object):
                     coords[key] = (i, coords[key])
 
             force_flat = kwargs.pop('force_flat', True)
-            return cls(data[:], dim_coords=coords, force_flat=force_flat,
+            return cls(data, dim_coords=coords, force_flat=force_flat,
                        time_units=times.units, time_cal=cal, **kwargs)
 
     @classmethod
@@ -423,7 +449,16 @@ class BaseDataObject(object):
 
         with tb.open_file(filename, 'r') as f:
 
-            data = f.get_node(data_dir, name=var_name)[:]
+            data = f.get_node(data_dir, name=var_name)
+            if data.attrs.masked:
+                fill_val = data.attrs.fill_value
+                data = data[:]
+                mask = data == fill_val
+                data = np.ma.array(data,
+                                   mask=mask,
+                                   fill_value=data.attrs.fill_value)
+            else:
+                data = data[:]
             lat = f.get_node(data_dir+'lat')
             lon = f.get_node(data_dir+'lon')
             coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
@@ -451,8 +486,8 @@ class BaseDataObject(object):
 class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
-                 force_flat=False, is_anomaly=False, is_run_mean=False,
-                 is_detrended=False, default_grp='/data'):
+                 force_flat=False, fill_value=None, chunk_shape=None,
+                 default_grp='/data'):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -475,12 +510,11 @@ class Hdf5DataObject(BaseDataObject):
             greater than or equal to the spatial dimensions of data.
         force_flat: bool
             Force spatial dimensions to be flattened (1D array)
-        is_anomaly: bool
-            Data is already in anomaly form.
-        is_run_mean: bool
-            Data has been smoothed with a running mean.
-        is_detrended: bool
             Data has been detrended.
+        fill_value: float
+            Value to be considered invalid data during the mask and 
+            compression. Only considered when data is not masked.
+            
         default_grp: tables.Group or str, optional
             Group to store all created databins under in the hdf5 file.
 
@@ -505,22 +539,105 @@ class Hdf5DataObject(BaseDataObject):
         self._default_grp = None
         self.set_databin_grp(default_grp)
 
+        if chunk_shape is None:
+            leading_time = BaseDataObject.TIME in dim_coords
+            self._chunk_shape = self._determine_chunk(leading_time,
+                                                      data.shape,
+                                                      data.dtype)
+        else:
+            self._chunk_shape = chunk_shape
+
+        data = da.from_array(data, chunks=self._chunk_shape)
+
         super(Hdf5DataObject, self).__init__(data,
                                              dim_coords=dim_coords,
                                              valid_data=valid_data,
                                              force_flat=force_flat,
-                                             is_anomaly=is_anomaly,
-                                             is_run_mean=is_run_mean,
-                                             is_detrended=is_detrended)
+                                             fill_value=fill_value)
+
+    def _set_curr_data_key(self, key):
+        if not hasattr(self.data, 'dask'):
+            chunk_shp = self._determine_chunk(self._leading_time,
+                                              self.data.shape,
+                                              self.data.dtype)
+            self._chunk_shape = chunk_shp
+            self.data = da.from_array(self.data, chunks=self._chunk_shape)
+        super(Hdf5DataObject, self)._set_curr_data_key(key)
 
     # Create backend data container
-    def _new_databin(self, data, name):
-        new = var_to_hdf5_carray(self.h5f,
-                                 self._default_grp,
-                                 name,
-                                 data)
+    def _new_empty_databin(self, shape, dtype, name):
+        new = empty_hdf5_carray(self.h5f,
+                                self._default_grp,
+                                name,
+                                tb.Atom.from_dtype(dtype),
+                                shape
+                                )
         self._data_bins[name] = new
         return new
+
+    def _new_databin(self, data, name):
+        new = self._new_empty_databin(data.shape, data.dtype, name)
+        da.store(data, new)
+        self._data_bins[name] = new
+        return new
+
+    def _determine_chunk(self, leading_time, shape, dtype, size=10):
+        """
+        Determine default chunk size for dask array operations.
+        
+        shape: tuple<int>
+            Shape of the data to be chunked.
+        dype: numpy.dtype
+            Datatype of the data to be chunked
+        size: int
+            Size (in MB) of the desired chunk
+        """
+        if leading_time:
+            sptl_size = np.product(shape[1:]) * dtype.itemsize
+            rows_in_chunk = size*1024**2 // sptl_size
+            rows_in_chunk = int(rows_in_chunk)
+            chunk = tuple([rows_in_chunk] + list(shape[1:]))
+        else:
+            nelem = np.product(shape)
+            elem_in_chunk = nelem*dtype.itemsize // (size * 1024**2)
+
+            if elem_in_chunk == 0:
+                chunk = shape
+            else:
+                dim_len = elem_in_chunk **(1./len(shape))
+                dim_len = int(dim_len)
+                chunk = tuple([dim_len for item in shape])
+        return chunk
+
+    def _check_invalid_data(self, data):
+
+        finite_data = da.isfinite(data)
+        not_filled_data = data != self._fill_value
+        valid_data = da.logical_and(finite_data, not_filled_data)
+
+        if self._leading_time:
+            time_len = data.shape[0]
+            valid_data = valid_data.sum(axis=0) == time_len
+
+        valid_data = valid_data.compute()
+        masked = True
+
+        if np.all(valid_data):
+            valid_data = None
+            masked = False
+
+        return masked, valid_data
+
+    def _compress_masked_data(self, data, mask, out_arr):
+        if self._leading_time:
+            compress_axis = 1
+        else:
+            compress_axis = None
+
+        compressed_data = da.compress(mask, data, axis=compress_axis)
+        da.store(compressed_data, out_arr)
+        return out_arr
+
 
     def set_databin_grp(self, group):
         """
@@ -556,6 +673,7 @@ class Hdf5DataObject(BaseDataObject):
     def from_netcdf(cls, filename, var_name, h5file):
 
         with ncf.Dataset(filename, 'r') as f:
+            # TODO: Figure out why multiprocessing dask arrays fail on netcdf
             data = f.variables[var_name][:]
             coords = {BaseDataObject.LAT: f.variables['lat'][:],
                       BaseDataObject.LON: f.variables['lon'][:]}
@@ -574,6 +692,11 @@ class Hdf5DataObject(BaseDataObject):
         with tb.open_file(filename, 'r') as f:
 
             data = f.get_node(data_dir, name=var_name)
+            try:
+                fill_val = data.attrs.fill_value
+            except AttributeError:
+                fill_val = None
+
             lat = f.get_node(data_dir+'lat')
             lon = f.get_node(data_dir+'lon')
             coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
@@ -582,7 +705,8 @@ class Hdf5DataObject(BaseDataObject):
             coords[BaseDataObject.TIME] = (times.attrs.index,
                                            ncf.num2date(times[:],
                                                         times.attrs.units))
-            return cls(data, h5file, dim_coords=coords, force_flat=True)
+            return cls(data, h5file, dim_coords=coords, force_flat=True,
+                       fill_value=fill_val)
 
 
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
@@ -764,11 +888,23 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
         out = empty_hdf5_carray(outf, data_dir, var_name, atom, shape)
 
         spatial_nbytes = np.product(data.shape[1:])*data.dtype.itemsize
-        tchunk_8mb = 8*1024**2 / spatial_nbytes
+        tchunk_60mb = 60*1024**2 // spatial_nbytes
+        fill_value = 1.0e20
 
+        masked = False
+        for k in xrange(0, shape[0], tchunk_60mb):
+            if k == 0:
+                data_chunk = data[k:k+tchunk_60mb]
+                masked = np.ma.is_masked(data_chunk)
+                if masked:
+                    out.attrs.masked = True
+                    out.attrs.fill_value = fill_value
+            elif masked:
+                data_chunk = data[k:k+tchunk_60mb].filled(1.0e20)
+            else:
+                data_chunk = data[k:k+tchunk_60mb]
 
-        for k in xrange(0, shape[0], tchunk_8mb):
-                out[k:k+tchunk_8mb] = data[k:k+tchunk_8mb]
+            out[k:k+tchunk_60mb] = data_chunk
 
         lat = var_to_hdf5_carray(outf, data_dir, 'lat',
                                  f.variables['lat'][:])
@@ -789,12 +925,19 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
         f.close()
         outf.close()
 
+
 def hdf5_to_data_obj(filename, var_name, h5file=None, data_dir='/'):
 
     f = tb.open_file(filename, 'r')
 
     try:
         data = f.get_node(data_dir, name=var_name)[:]
+        if data.attrs.masked:
+            mask = data == data.attrs.fill_value
+            data = np.ma.array(data,
+                               mask=mask,
+                               fill_value=data.attrs.fill_value)
+
         lat = f.get_node(data_dir+'lat')
         lon = f.get_node(data_dir+'lon')
         coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),

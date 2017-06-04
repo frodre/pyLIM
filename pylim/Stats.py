@@ -7,11 +7,12 @@ Author: Andre Perkins
 
 import numpy as np
 import numexpr as ne
+import dask.array as da
 from math import ceil
 from scipy.linalg import svd
 
 
-def calc_anomaly(data, yrsize, climo=None):
+def calc_anomaly(data, yrsize, climo=None, output_arr=None):
     """
     Caculate anomaly for the given data.  Right now it assumes sub-annual data
     input so that the climatology subtracts means for each month instead
@@ -31,12 +32,20 @@ def calc_anomaly(data, yrsize, climo=None):
     climo: ndarray, optional
         User-provided climatology to subtract from the data.  Must be
         broadcastable over the time-dimension of data
-
+    output_arr: ndarray-like, optional
+        Array to place output of anomaly calculation that supports 
+        ndarray-like slicing.  This is required for dask array input.
     Returns
     -------
-    anomaly: ndarray
+    anomaly: ndarray-like
         Data converted to its anomaly form.
+    climo: ndarray
+        The calculated climatology that was subtracted from the data
     """
+
+    yrsize = int(yrsize)
+    if not yrsize >= 1:
+        raise ValueError('yrsize must be an integer >= 1')
 
     # Reshape to take monthly mean
     old_shp = data.shape
@@ -48,14 +57,29 @@ def calc_anomaly(data, yrsize, climo=None):
         climo = data.mean(axis=0)
 
     if hasattr(data, 'dask'):
-        climo.compute()
-        anomaly = data - climo
-        anomaly.compute()
-    else:
-        # anomaly = data[:].reshape(new_shp) - climo
-        anomaly = ne.evaluate('data - climo')
+        if output_arr is None:
+            raise ValueError('calc_anomaly requires an output array keyword '
+                             'argument when operating on a Dask array.')
 
-    return anomaly.reshape(old_shp), climo
+        out_climo = climo.compute()
+
+        # Need to stack along subannual to subtract (manual broadcast)
+        if yrsize != 1:
+            concat_climo = [climo for _ in xrange(data.shape[0])]
+            climo = da.concatenate(concat_climo, axis=0)
+
+        data = data.reshape(old_shp)
+        anomaly = data - climo
+        da.store(anomaly, output_arr)
+    else:
+        if output_arr is not None:
+            output_arr[:] = ne.evaluate('data - climo')
+        else:
+            output_arr = ne.evaluate('data - climo')
+        output_arr = output_arr.reshape(old_shp)
+        out_climo = climo
+
+    return output_arr, out_climo
 
 
 def calc_ce(fcast, trial_obs, obs):
