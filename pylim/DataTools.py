@@ -297,19 +297,30 @@ class BaseDataObject(object):
 
         return full
 
-    def calc_running_mean(self, window_size, save=True, **kwargs):
-        assert self._leading_time, 'Can only perform running mean with a '\
-            'specified leading sampling dimension'
-        self.data, bedge, tedge = run_mean(self.data, window_size,
-                                           **kwargs)
+    def calc_running_mean(self, window_size, year_len, save=True):
+
+        # TODO: year_len should eventually be a property determined during init
+        if not self._leading_time:
+            raise ValueError('Can only perform a running mean when data has a '
+                             'leading sampling dimension.')
+
+        edge_pad = window_size // 2
+        edge_trim = np.ceil(edge_pad / float(year_len)) * year_len
+
         if save and not self._save_none:
-            self.running_mean = self._new_databin(self.data, self._RUNMEAN)
-        self._curr_data_key = self._RUNMEAN
-        self.is_run_mean = True
-        # Running mean smooths data, no longer an anomaly or detrended
-        self.is_anomaly = False
-        self.is_detrended = False
-        return self.data, bedge, tedge
+            new_time = self.data.shape[0] - edge_trim * 2
+            new_shape = list(self.data.shape)
+            new_shape[0] = new_time
+            new_shape = tuple(new_shape)
+            self.running_mean = self._new_empty_databin(new_shape,
+                                                        self.data.dtype,
+                                                        self._RUNMEAN)
+
+        self.data = run_mean(self.data, window_size, trim_edge=edge_trim,
+                             output_arr=self.running_mean)
+        self._set_curr_data_key(self._RUNMEAN)
+
+        return self.running_mean
 
     # TODO: Use provided time coordinates to determine year size
     # TODO: Determine if climo needs to be tied to object
@@ -396,6 +407,9 @@ class BaseDataObject(object):
     def reset_data(self, key):
         try:
             self.data = self._data_bins[key][:]
+            if self._leading_time:
+                # running mean alters the time TODO: check that this works
+                self._time_shp = [self.data.shape[0]]
         except KeyError:
             raise KeyError('Key {} not saved.  Could not reset self.data.')
 

@@ -10,6 +10,7 @@ import numexpr as ne
 import dask.array as da
 from math import ceil
 from scipy.linalg import svd
+from scipy.ndimage import convolve1d
 
 
 def calc_anomaly(data, yrsize, climo=None, output_arr=None):
@@ -240,7 +241,7 @@ def calc_n_eff(data1, data2=None):
     return n_eff
 
 
-def run_mean(data, window_size, shave_yr=False, year_len=12):
+def run_mean(data, window_size, trim_edge=None, output_arr=None):
     """
     A function for calculating the running mean on data.
 
@@ -251,12 +252,13 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
         space(column) format. And that samples span full years.
     window_size: int
         Size of the window to compute the running mean over.
-    shave_yr: bool, optional
-        The running mean will remove ends off the data. If shave_yr is true it
-        will remove an full year_len chunk from the ends instead of a
-        partial chunk.
-    year_len: int, optional
-        Number of elements in a timeseries that represents a full year.
+    trim_edge: int, optional
+        Remove specified items from the start and end of the sampling
+        dimension of the running mean.  Otherwise the window_size/2 items at
+        the start and the end will have reflected padding effects.
+    output_arr: ndarray-like, optional
+        Array to place output of running mean that supports
+        ndarray-like slicing.  This is required for dask array input.
 
     Returns
     -------
@@ -268,32 +270,39 @@ def run_mean(data, window_size, shave_yr=False, year_len=12):
         Number of elements removed from the ending of the time series
     """
 
-    dshape = data.shape
-    assert(dshape[0] >= window_size), ("Window size must be smaller than or "
-                                       "equal to the length of the time "
-                                       "dimension of the data.")
+    sample_len = data.shape[0]
+    if sample_len < window_size:
+        raise ValueError("Window size must be smaller than or equal to the "
+                         "length of the time dimension of the data.")
 
-    # Determine how much data is removed from beginning and end
-    if shave_yr:
-        tedge = window_size//2
-        cut_from_top = year_len * int(ceil(tedge/float(year_len)))
-        bedge = (window_size//2) + (window_size % 2) - 1
-        cut_from_bot = year_len * int(ceil(bedge/float(year_len)))
+    if trim_edge is not None:
+        sample_len -= trim_edge*2
+
+        if sample_len < 1:
+            raise ValueError('Not enough data to trim edges. Please try with '
+                             'trim_edge=None')
+
+    weights = [1.0/float(window_size) for _ in xrange(window_size)]
+    if hasattr(data, 'dask'):
+        if output_arr is None:
+            raise ValueError('calc_anomaly requires an output array keyword '
+                             'argument when operating on a Dask array.')
+
+        def _run_mean_block(block):
+            return convolve1d(block, weights, axis=0)
+
+        pad = window_size // 2
+        ghost = da.ghost.ghost(data, depth={0: pad}, boundary={0: 'reflect'})
+        filt = ghost.map_blocks(_run_mean_block, window_size)
+        unpadded = da.ghost.trim_internal(filt, {0: pad})
+        if trim_edge is not None:
+            unpadded = unpadded[trim_edge:-trim_edge]
+
+        da.store(unpadded, output_arr)
     else:
-        cut_from_top = window_size//2
-        bedge = cut_from_bot = (window_size//2) + (window_size % 2) - 1
-    tot_cut = cut_from_top + cut_from_bot
-    new_shape = list(dshape)
-    new_shape[0] -= tot_cut
+        res = convolve1d(data, weights, axis=0)
+        if trim_edge:
+            res = res[trim_edge:-trim_edge]
+        output_arr[:] = res
 
-    assert(new_shape[0] > 0), ("Not enough data to trim partial years from "
-                               "edges.  Please try with shaveYr=False")
-
-    # Allocate memory and perform running mean
-    result = np.zeros(new_shape, dtype=data.dtype)
-
-    for i in xrange(new_shape[0]):
-        cntr = cut_from_bot - bedge + i
-        result[i] = (data[cntr:(cntr+window_size)].mean(axis=0))
-
-    return result, cut_from_bot, cut_from_top
+    return output_arr
