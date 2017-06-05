@@ -294,7 +294,7 @@ def run_mean(data, window_size, trim_edge=None, output_arr=None):
         old_chunk_shape = data
         pad = window_size // 2
         ghost = da.ghost.ghost(data, depth={0: pad}, boundary={0: 'reflect'})
-        filt = ghost.map_blocks(_run_mean_block, window_size)
+        filt = ghost.map_blocks(_run_mean_block)
         unpadded = da.ghost.trim_internal(filt, {0: pad})
         if trim_edge is not None:
             unpadded = unpadded[trim_edge:-trim_edge]

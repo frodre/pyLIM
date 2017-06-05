@@ -320,7 +320,7 @@ class BaseDataObject(object):
                              output_arr=self.running_mean)
         self._set_curr_data_key(self._RUNMEAN)
 
-        return self.running_mean
+        return self.data
 
     # TODO: Use provided time coordinates to determine year size
     # TODO: Determine if climo needs to be tied to object
@@ -661,7 +661,10 @@ class Hdf5DataObject(BaseDataObject):
                                                             year_len,
                                                             save=save)
 
-        return res.rechunk(orig)
+        if self._leading_time:
+            res = res.rechunk(orig)
+        
+        return res
 
     def set_databin_grp(self, group):
         """
