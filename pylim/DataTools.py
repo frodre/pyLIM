@@ -14,8 +14,7 @@ import numexpr as ne
 import multiprocessing as mp
 import cPickle as cpk
 
-from Stats import run_mean, calc_anomaly
-from scipy.signal import detrend
+from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array
 
 tb.parameters.NODE_CACHE_SLOTS = 0
 
@@ -96,6 +95,8 @@ class BaseDataObject(object):
         self._data_bins = {}
         self._curr_data_key = None
         self._ops_performed = []
+        self._start_time_edge = None
+        self._end_time_edge = None
 
         # Future possible data manipulation functionality
         self.anomaly = None
@@ -163,7 +164,6 @@ class BaseDataObject(object):
         self.is_masked, self.valid_data = self._data_masking(data)
         if self.valid_data is not None:
             self.valid_data = self.valid_data.flatten()
-            self.mask = np.logical_not(self.valid_data)
 
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
@@ -175,9 +175,10 @@ class BaseDataObject(object):
         else:
             self.data = data
 
+        # I don't think
         # Initialized here for flattening purposes
-        if not save_none:
-            self.orig_data = self._new_databin(self.data, self._ORIGDATA)
+        # if not save_none:
+        #     self.orig_data = self._new_databin(self.data, self._ORIGDATA)
         self._set_curr_data_key(self._ORIGDATA)
 
         # Compress the data if mask is present
@@ -193,9 +194,9 @@ class BaseDataObject(object):
                                                                self.data.dtype,
                                                                self._COMPRESSED)
 
-            self.data = self._compress_masked_data(self.data,
-                                                   self.mask,
-                                                   out_arr=self.compressed_data)
+            self.data = self._compress_to_valid_data(self.data,
+                                                     self.valid_data,
+                                                     out_arr=self.compressed_data)
             self._set_curr_data_key(self._COMPRESSED)
 
     def _set_curr_data_key(self, key):
@@ -253,7 +254,7 @@ class BaseDataObject(object):
 
         return masked, valid_data
 
-    def _compress_masked_data(self, data, mask, out_arr=None):
+    def _compress_to_valid_data(self, data, mask, out_arr=None):
         if self._leading_time:
             compress_axis=1
         else:
@@ -307,8 +308,8 @@ class BaseDataObject(object):
         edge_pad = window_size // 2
         edge_trim = np.ceil(edge_pad / float(year_len)) * year_len
 
+        new_time = self.data.shape[0] - edge_trim * 2
         if save and not self._save_none:
-            new_time = self.data.shape[0] - edge_trim * 2
             new_shape = list(self.data.shape)
             new_shape[0] = new_time
             new_shape = tuple(new_shape)
@@ -318,6 +319,9 @@ class BaseDataObject(object):
 
         self.data = run_mean(self.data, window_size, trim_edge=edge_trim,
                              output_arr=self.running_mean)
+        self._time_shp = [new_time]
+        self._start_time_edge = edge_trim
+        self._end_time_edge = -edge_trim
         self._set_curr_data_key(self._RUNMEAN)
 
         return self.data
@@ -325,8 +329,9 @@ class BaseDataObject(object):
     # TODO: Use provided time coordinates to determine year size
     # TODO: Determine if climo needs to be tied to object
     def calc_anomaly(self, yr_size, save=True, climo=None):
-        assert self._leading_time, 'Can only perform anomaly calculation with '\
-            'a specified leading sampling dimension'
+        if not self._leading_time:
+            raise ValueError('Can only perform anomaly calculation with a '
+                             'specified leading sampling dimension')
 
         if save and not self._save_none:
             self.anomaly = self._new_empty_databin(self.data.shape,
@@ -338,32 +343,49 @@ class BaseDataObject(object):
                                              output_arr=self.anomaly)
 
         self._set_curr_data_key(self._ANOMALY)
-        return self.anomaly
+        return self.data
 
     def detrend_data(self, save=True):
-        assert self._leading_time, 'Can only perform anomaly calculation with '\
-            'a specified leading sampling dimension'
-        self.data = detrend(self.data, axis=0, type='linear')
+        if not self._leading_time:
+            raise ValueError('Can only perform detrending with a specified '
+                             'leading sampling dimension')
+
         if save and not self._save_none:
-            self.detrended = self._new_databin(self.data, self._DETRENDED)
-        self._curr_data_key = self._DETRENDED
-        self.is_detrended = True
-        return self.detrended
+            self.detrended = self._new_empty_databin(self.data.shape,
+                                                     self.data.dtype,
+                                                     self._DETRENDED)
+
+        self.data = detrend_data(self.data, output_arr=self.detrended)
+        self._set_curr_data_key(self._DETRENDED)
+        return self.data
 
     def area_weight_data(self, save=True):
         if self.LAT not in self._dim_idx.keys():
             warnings.warn('No latitude dimension specified. No area weighting'
                           'was performed.')
             return self.data
+
+        if save and not self._save_none:
+            self.area_weighted = self._new_empty_databin(self.data.shape,
+                                                         self.data.dtype,
+                                                         self._AWGHT)
         lats = self.get_coordinate_grids([self.LAT])[self.LAT]
         scale = np.sqrt(abs(np.cos(np.radians(lats))))
-        awgt = self.data
-        self.data = ne.evaluate('awgt * scale')
+
+        if is_dask_array(self.data):
+            awgt = self.data * scale
+            da.store(awgt, self.area_weighted)
+        else:
+            awgt = self.data
+            self.area_weighted[:] = ne.evaluate('awgt * scale')
+
+        self.data = self.area_weighted
+        self._set_curr_data_key(self._AWGHT)
+
+    def eof_decomposition(self, save=True):
+
         if save and not self._save_none:
-            self.area_weighted = self._new_databin(self.data,
-                                                   self._AWGHT)
-        self._curr_data_key = self._AWGHT
-        self.is_area_weighted = True
+            pass
 
     def get_dim_coords(self, keys):
         dim_coords = {}
@@ -406,7 +428,7 @@ class BaseDataObject(object):
     # TODO: figure out consisntent state booleans is_detrended, etc.
     def reset_data(self, key):
         try:
-            self.data = self._data_bins[key][:]
+            self.data = self._data_bins[key]
             if self._leading_time:
                 # running mean alters the time TODO: check that this works
                 self._time_shp = [self.data.shape[0]]
@@ -593,7 +615,7 @@ class Hdf5DataObject(BaseDataObject):
         self._data_bins[name] = new
         return new
 
-    def _determine_chunk(self, leading_time, shape, dtype, size=10):
+    def _determine_chunk(self, leading_time, shape, dtype, size=32):
         """
         Determine default chunk size for dask array operations.
         
@@ -618,7 +640,7 @@ class Hdf5DataObject(BaseDataObject):
             else:
                 dim_len = elem_in_chunk **(1./len(shape))
                 dim_len = int(dim_len)
-                chunk = tuple([dim_len for item in shape])
+                chunk = tuple([dim_len for _ in shape])
         return chunk
 
     def _check_invalid_data(self, data):
@@ -640,13 +662,13 @@ class Hdf5DataObject(BaseDataObject):
 
         return masked, valid_data
 
-    def _compress_masked_data(self, data, mask, out_arr):
+    def _compress_to_valid_data(self, data, valid, out_arr):
         if self._leading_time:
             compress_axis = 1
         else:
             compress_axis = None
 
-        compressed_data = da.compress(mask, data, axis=compress_axis)
+        compressed_data = da.compress(valid, data, axis=compress_axis)
         da.store(compressed_data, out_arr)
         return out_arr
 
@@ -655,7 +677,7 @@ class Hdf5DataObject(BaseDataObject):
         if self._leading_time:
             orig = self._chunk_shape
             new_chunk = tuple([window_size*50] + list(orig[1:]))
-            self.data.rechunk(new_chunk)
+            self.data = self.data.rechunk(new_chunk)
 
         res = super(Hdf5DataObject, self).calc_running_mean(window_size,
                                                             year_len,
@@ -726,8 +748,17 @@ class Hdf5DataObject(BaseDataObject):
 
             lat = f.get_node(data_dir+'lat')
             lon = f.get_node(data_dir+'lon')
-            coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
-                      BaseDataObject.LON: (lon.attrs.index, lon[:])}
+            lat_idx = lat.attrs.index
+            lon_idx = lon.attrs.index
+
+            # TODO: need an explicit lat lon loading function that accounts for
+            # this
+            # account for 2d lat lon storage
+            if len(lat.shape) > 1:
+                lat = lat[:, 0]
+                lon = lon[0]
+            coords = {BaseDataObject.LAT: (lat_idx, lat[:]),
+                      BaseDataObject.LON: (lon_idx, lon[:])}
             times = f.get_node(data_dir+'time')
             coords[BaseDataObject.TIME] = (times.attrs.index,
                                            ncf.num2date(times[:],
@@ -983,3 +1014,4 @@ def hdf5_to_data_obj(filename, var_name, h5file=None, data_dir='/'):
 
     finally:
         f.close()
+
