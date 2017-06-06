@@ -70,7 +70,7 @@ setup(
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=['numpy', 'scipy', 'tables', 'matplotlib',
-                      'basemap', 'numexpr', 'netCDF4', 'dask'],
+                      'basemap', 'numexpr', 'netCDF4', 'dask', 'scikit-learn'],
 
     # List additional groups of dependencies here (e.g. development
     # dependencies). You can install these using the following syntax,
