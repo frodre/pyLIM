@@ -14,7 +14,8 @@ import numexpr as ne
 import multiprocessing as mp
 import cPickle as cpk
 
-from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array
+from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
+                  dask_detrend_data
 
 tb.parameters.NODE_CACHE_SLOTS = 0
 
@@ -263,6 +264,10 @@ class BaseDataObject(object):
         out_arr = np.compress(mask, data, axis=compress_axis, out=out_arr)
         return out_arr
 
+    @staticmethod
+    def _detrend_func(data, output_arr=None):
+        return detrend_data(data, output_arr=output_arr)
+
     def inflate_full_grid(self, data=None, reshape_orig=False):
         """
         Returns previously compressed data to its full grid filled with np.NaN
@@ -355,7 +360,7 @@ class BaseDataObject(object):
                                                      self.data.dtype,
                                                      self._DETRENDED)
 
-        self.data = detrend_data(self.data, output_arr=self.detrended)
+        self.data = self._detrend_func(self.data, output_arr=self.detrended)
         self._set_curr_data_key(self._DETRENDED)
         return self.data
 
@@ -671,6 +676,10 @@ class Hdf5DataObject(BaseDataObject):
         compressed_data = da.compress(valid, data, axis=compress_axis)
         da.store(compressed_data, out_arr)
         return out_arr
+
+    @staticmethod
+    def _detrend_func(data, output_arr=None):
+        return dask_detrend_data(data, output_arr=output_arr)
 
     def calc_running_mean(self, window_size, year_len, save=True):
 

@@ -7,7 +7,9 @@ Author: Andre Perkins
 
 import numpy as np
 import numexpr as ne
+import dask
 import dask.array as da
+import chest
 from scipy.linalg import svd
 from scipy.ndimage import convolve1d
 from sklearn import linear_model
@@ -29,33 +31,44 @@ def detrend_data(data, output_arr=None):
     This is a very expensive operation if using a large dataset.
     """
 
-    if is_dask_array(data):
-        chunk_shp = [shp[0] for shp in data.chunks]
-        tmp_data = data[:].compute()
-
-    dummy_time = np.arange(tmp_data.shape[0])[:, None]
+    dummy_time = np.arange(data.shape[0])[:, None]
     model = linear_model.LinearRegression(fit_intercept=False, n_jobs=-1)
-    model.fit(dummy_time, tmp_data)
-
-    if is_dask_array(data):
-        del tmp_data
+    model.fit(dummy_time, data)
 
     linfit = model.predict(dummy_time)
-
-    if is_dask_array(data):
-        linfit = da.from_array(linfit, chunks=chunk_shp)
-
     detrended = data - linfit
 
-    if is_dask_array(detrended):
-        if output_arr is None:
-            raise ValueError('calc_anomaly requires an output array keyword'
-                             ' argument when operating on a Dask array.')
-        da.store(detrended, output_arr)
-    elif output_arr is not None:
+    if output_arr is not None:
         output_arr[:] = detrended
     else:
         output_arr = detrended
+
+    return output_arr
+
+
+def dask_detrend_data(data, output_arr):
+
+    cache = chest.Chest(available_memory=30e9,
+                        path='/home/katabatic/wperkins/scratch')
+    with dask.set_options(cache=cache):
+        dummy_time = np.arange(data.shape[0])
+
+        x = dummy_time[:, None]
+        y = data
+        ymean = data.mean(axis=0)
+        xmean = dummy_time.mean()
+
+        xanom = x - xmean
+        yanom = y - ymean
+        covxy = da.sum(xanom * yanom, axis=0)
+        xvar = x.var(axis=0, ddof=1)
+        beta = covxy/xvar
+        intercept = ymean - xmean*beta
+
+        predict = beta*x + intercept
+        detrended = data - predict
+
+        da.store(detrended, output_arr)
 
     return output_arr
 
@@ -351,7 +364,11 @@ def run_mean(data, window_size, trim_edge=None, output_arr=None):
         res = convolve1d(data, weights, axis=0)
         if trim_edge:
             res = res[trim_edge:-trim_edge]
-        output_arr[:] = res
+
+        if output_arr is not None:
+            output_arr[:] = res
+        else:
+            output_arr = res
 
     return output_arr
 
