@@ -15,7 +15,7 @@ import multiprocessing as mp
 import cPickle as cpk
 
 from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
-                  dask_detrend_data
+                  dask_detrend_data, calc_eofs
 
 tb.parameters.NODE_CACHE_SLOTS = 0
 
@@ -51,6 +51,9 @@ class BaseDataObject(object):
     _RUNMEAN = 'run_mean'
     _ANOMALY = 'anomaly'
     _CLIMO = 'climo'
+    _EOFPROJ = 'eofproj'
+    _EOFS_TAG = 'eofs'
+    _SVALS_TAG = 'svals'
 
     @staticmethod
     def _match_dims(shape, dim_coords):
@@ -98,6 +101,9 @@ class BaseDataObject(object):
         self._ops_performed = []
         self._start_time_edge = None
         self._end_time_edge = None
+        self._eofs = None
+        self._svals = None
+        self._eof_stats = {}
 
         # Future possible data manipulation functionality
         self.anomaly = None
@@ -106,6 +112,7 @@ class BaseDataObject(object):
         self.running_mean = None
         self.detrended = None
         self.area_weighted = None
+        self.eof_proj = None
 
         # Match dimension coordinate vectors
         if dim_coords is not None:
@@ -387,10 +394,30 @@ class BaseDataObject(object):
         self.data = self.area_weighted
         self._set_curr_data_key(self._AWGHT)
 
-    def eof_decomposition(self, save=True):
+    def eof_proj_data(self, num_eigs, save=True):
+        if not self._leading_time:
+            raise ValueError('Can only perform eof calculation with a '
+                             'specified leading sampling dimension')
 
         if save and not self._save_none:
-            pass
+            new_shp = (self.data.shape[0], num_eigs)
+            self.eof_proj = self._new_empty_databin(new_shp,
+                                                    self.data.dtype,
+                                                    self._EOFPROJ)
+
+        self._eofs, self._svals = calc_eofs(self.data, num_eigs,
+                                            var_stats_dict=self._eof_stats)
+
+        if is_dask_array(self.data):
+            proj = da.dot(self.data, self._eofs)
+            da.store(proj, self.eof_proj)
+        else:
+            self.eof_proj[:] = np.dot(self.data, self._eofs)
+
+        self.data = self.eof_proj
+        self._set_curr_data_key(self._EOFPROJ)
+
+        return self.data
 
     def get_dim_coords(self, keys):
         dim_coords = {}
@@ -620,7 +647,8 @@ class Hdf5DataObject(BaseDataObject):
         self._data_bins[name] = new
         return new
 
-    def _determine_chunk(self, leading_time, shape, dtype, size=32):
+    @staticmethod
+    def _determine_chunk(leading_time, shape, dtype, size=32):
         """
         Determine default chunk size for dask array operations.
         
@@ -677,9 +705,12 @@ class Hdf5DataObject(BaseDataObject):
         da.store(compressed_data, out_arr)
         return out_arr
 
+    #TODO: Need to tie this to some more formal configuration
     @staticmethod
-    def _detrend_func(data, output_arr=None):
-        return dask_detrend_data(data, output_arr=output_arr)
+    def _detrend_func(data, output_arr=None, **kwargs):
+        return dask_detrend_data(data, output_arr=output_arr,
+                                 cache_path='/home/katabatic/wperkins/scratch',
+                                 available_mem=30e9)
 
     def calc_running_mean(self, window_size, year_len, save=True):
 

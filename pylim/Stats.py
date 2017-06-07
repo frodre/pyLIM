@@ -23,12 +23,8 @@ def detrend_data(data, output_arr=None):
     ----------
     data: ndarray-like
         Input dataset to detrend.  Assumes leading axis is sampling dimension.
-    output_arr: ndarray-like
+    output_arr: ndarray-like, optional
         Output array with same shape as data to store detrended data.
-        
-    Notes
-    -----
-    This is a very expensive operation if using a large dataset.
     """
 
     dummy_time = np.arange(data.shape[0])[:, None]
@@ -46,10 +42,29 @@ def detrend_data(data, output_arr=None):
     return output_arr
 
 
-def dask_detrend_data(data, output_arr):
+def dask_detrend_data(data, output_arr, cache_path=None, available_mem=16e9):
+    """
+    Detrend data using a linear fit.
 
-    cache = chest.Chest(available_memory=30e9,
-                        path='/home/katabatic/wperkins/scratch')
+    Parameters
+    ----------
+    data: dask.array
+        Input dataset to detrend.  Assumes leading axis is sampling dimension.
+    output_arr: ndarray-like
+        Output array with same shape as data to store detrended data.
+    cache_path: str, optional
+        Where to place the temporary cache data.
+    available_mem: int, optional
+        Amount of memory to consume before forcing dask operations to spill
+        intermediate values to disk.  Defaults to 16GB.
+
+    Notes
+    -----
+    This is a very expensive operation if using a large dataset.  May slow down
+    if forced to spill onto the disk cache
+    """
+    cache = chest.Chest(available_memory=available_mem,
+                        path=cache_path)
     with dask.set_options(cache=cache):
         dummy_time = np.arange(data.shape[0])
 
@@ -179,8 +194,12 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
         Dataset to calculate EOFs from
     num_eigs: int
         Number of eigenvalues/vectors to return.  Must be less than min(m, n).
-    retPCs: bool, optional
+    ret_pcs: bool, optional
         Return principal component matrix along with EOFs
+    var_stats_dict: dict, optional
+        Dictionary target to star some simple statistics about the EOF
+        calculation.  Note: if this is provided for a dask array it prompts two
+        SVD calculations for both the compressed and full singular values.
 
     Returns
     -------
@@ -192,17 +211,33 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
         in order from largest to smallest.
     """
 
-    eofs, svals, pcs = svd(data[:].T, full_matrices=False)
-    eofs = eofs[:, :num_eigs]
-    trunc_svals = svals[:num_eigs]
-    pcs = pcs[:num_eigs]
+    if is_dask_array(data):
+        pcs, full_svals, eofs = da.linalg.svd_compressed(data, num_eigs)
+
+        out_svals = np.zeros(num_eigs)
+        out_eofs = np.zeros(num_eigs, data.shape[1])
+        out_pcs = np.zeros(data.shape[0], num_eigs)
+        da.store([eofs, full_svals, pcs], [out_eofs, out_svals, out_pcs])
+
+        out_eofs = out_eofs.T
+        out_pcs = out_pcs.T
+
+        if var_stats_dict is not None:
+            _, full_svals, _ = da.linalg.svd(data)
+            full_svals.compute()
+
+    else:
+        eofs, full_svals, pcs = svd(data[:].T, full_matrices=False)
+        out_eofs = eofs[:, :num_eigs]
+        out_svals = full_svals[:num_eigs]
+        out_pcs = pcs[:num_eigs]
 
     # variance stats
     if var_stats_dict is not None:
         try:
-            nt = pcs.shape[1]
-            ns = eofs.shape[0]
-            eig_vals = (svals**2) / (nt*ns)
+            nt = data.shape[0]
+            ns = data.shape[1]
+            eig_vals = (full_svals ** 2) / (nt * ns)
             total_var = eig_vals.sum()
             var_expl_by_mode = eig_vals / total_var
             var_expl_by_retained = var_expl_by_mode[0:num_eigs].sum()
@@ -220,9 +255,9 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
             print e
 
     if ret_pcs:
-        return eofs, trunc_svals, pcs
+        return out_eofs, out_svals, out_pcs
     else:
-        return eofs, trunc_svals
+        return out_eofs, out_svals
 
 
 def calc_lac(fcast, obs):
