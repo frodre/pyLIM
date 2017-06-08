@@ -9,7 +9,6 @@ import dask
 import dask.array as da
 import numpy as np
 import os.path as path
-import warnings
 import netCDF4 as ncf
 import numexpr as ne
 import chest
@@ -266,6 +265,10 @@ class BaseDataObject(object):
         return new
 
     def _gen_composite_mask(self, data):
+        """
+        Generate a mask (over the time dimension if present) that masks all
+        locations that are missing data.
+        """
         logger.debug('Generating composite mask from data mask.')
         if self._leading_time:
             composite_mask = data.mask.sum(axis=0) > 0
@@ -275,6 +278,11 @@ class BaseDataObject(object):
         return composite_mask
 
     def _check_invalid_data(self, data):
+        """
+        Check for invalid (inf or NaN) data in the data.  Like
+        _gen_composite_mask it operates over the time dimension if present,
+        and only returns true for locations that have all valid data.
+        """
         logger.info('Checking data for invalid elements.')
 
         full_valid = np.isfinite(data)
@@ -298,6 +306,9 @@ class BaseDataObject(object):
         return masked, valid_data
 
     def _data_masking(self, data):
+        """
+        Check and generate a valid data mask.
+        """
         logger.info('Performing masking and invalid data checks.')
         if np.ma.is_masked(data[0]):
             masked = True
@@ -308,14 +319,17 @@ class BaseDataObject(object):
 
         return masked, valid_data
 
-    def _compress_to_valid_data(self, data, mask, out_arr=None):
+    def _compress_to_valid_data(self, data, valid_mask, out_arr=None):
+        """
+        Compress data to only the valid locations.
+        """
         logger.info('Compressing data to valid spatial locations.')
         if self._leading_time:
             compress_axis = 1
         else:
             compress_axis = None
 
-        out_arr = np.compress(mask, data, axis=compress_axis, out=out_arr)
+        out_arr = np.compress(valid_mask, data, axis=compress_axis, out=out_arr)
         return out_arr
 
     @staticmethod
@@ -362,6 +376,29 @@ class BaseDataObject(object):
         return full
 
     def calc_running_mean(self, window_size, year_len, save=True):
+        """
+        Calculate a running mean over the sampling dimension.
+
+        Parameters
+        ----------
+        window_size: int
+            Number of samples to include in the running mean window.
+        year_len: int
+            Number of samples in a year.  If sampling frequency is longer
+            than 1 year this will default to 1.
+        save: bool, optional
+            Whether or not to save data in a new databin. (Default is True)
+
+        Returns
+        -------
+        ndarray-like
+            Data filtered using a running mean.
+
+        Notes
+        -----
+        This function will trim each end of the sample by removing
+        ciel(window_size//2 / year_len) * year_len.
+        """
         logger.info('Filtering data using running mean...')
         logger.debug('window_size = {:d}, year_len = {:d}'.format(window_size,
                                                                   year_len))
@@ -371,6 +408,9 @@ class BaseDataObject(object):
             logger.error('Running mean requires leading time dimension.')
             raise ValueError('Can only perform a running mean when data has a '
                              'leading sampling dimension.')
+
+        if year_len < 1:
+            year_len = 1
 
         edge_pad = window_size // 2
         edge_trim = np.ceil(edge_pad / float(year_len)) * year_len
@@ -394,9 +434,27 @@ class BaseDataObject(object):
         return self.data
 
     # TODO: Use provided time coordinates to determine year size
-    def calc_anomaly(self, yr_size, save=True, climo=None):
+    def calc_anomaly(self, year_len, save=True, climo=None):
+        """
+        Center the data (anomaly) over the sampling dimension. If the there are
+        multiple samples within a year (yr_size>1) then the climatology is
+        calculated for each subannual quantity.
+
+        Parameters
+        ----------
+        year_len: int
+            Number of samples in a year.  If sampling frequency is longer
+            than 1 year this will default to 1.
+        save: bool, optional
+            Whether or not to save data in a new databin. (Default is True)
+
+        Returns
+        -------
+        ndarray-like
+            Centered data
+        """
         logger.info('Centering data and saving climatology...')
-        logger.debug('yr_size = {:d}'.format(yr_size))
+        logger.debug('yr_size = {:d}'.format(year_len))
         if not self._leading_time:
             raise ValueError('Can only perform anomaly calculation with a '
                              'specified leading sampling dimension')
@@ -406,7 +464,10 @@ class BaseDataObject(object):
                                                    self.data.dtype,
                                                    self._ANOMALY)
 
-        self.data, self.climo = calc_anomaly(self.data, yr_size,
+        if year_len < 1:
+            year_len = 1
+
+        self.data, self.climo = calc_anomaly(self.data, year_len,
                                              climo=climo,
                                              output_arr=self.anomaly)
 
@@ -414,6 +475,19 @@ class BaseDataObject(object):
         return self.data
 
     def detrend_data(self, save=True):
+        """
+        Remove linear trends from the data along the sampling dimension.
+
+        Parameters
+        ----------
+        save: bool, optional
+            Whether or not to save data in a new databin. (Default is True)
+
+        Returns
+        -------
+        ndarray-like
+            Detrended data
+        """
         logger.info('Detrending data...')
         if not self._leading_time:
             raise ValueError('Can only perform detrending with a specified '
@@ -429,6 +503,23 @@ class BaseDataObject(object):
         return self.data
 
     def area_weight_data(self, save=True):
+        """
+        Perform a gridcell area weighting by latitude on the data. Required
+        before EOF projection.
+
+        TODO: Figure out what correct way to handle rotated pole grids
+        (Maybe equivalent latitude field?)
+
+        Parameters
+        ----------
+        save: bool, optional
+            Whether or not to save data in a new databin. (Default is True)
+
+        Returns
+        -------
+        ndarray-like
+            Area-weighted data
+        """
         logging.info('Area weighting data by latitude...')
         if self.LAT not in self._dim_idx.keys():
             logger.warning('No latitude dimension specified. No area weighting'

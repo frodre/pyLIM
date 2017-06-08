@@ -53,11 +53,6 @@ def dask_detrend_data(data, output_arr):
         Input dataset to detrend.  Assumes leading axis is sampling dimension.
     output_arr: ndarray-like
         Output array with same shape as data to store detrended data.
-    cache_path: str, optional
-        Where to place the temporary cache data.
-    available_mem: int, optional
-        Amount of memory to consume before forcing dask operations to spill
-        intermediate values to disk.  Defaults to 16GB.
 
     Notes
     -----
