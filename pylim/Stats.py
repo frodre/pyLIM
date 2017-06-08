@@ -7,12 +7,13 @@ Author: Andre Perkins
 
 import numpy as np
 import numexpr as ne
-import dask
 import dask.array as da
-import chest
+import logging
 from scipy.linalg import svd
 from scipy.ndimage import convolve1d
 from sklearn import linear_model
+
+logger = logging.getLogger(__name__)
 
 
 def detrend_data(data, output_arr=None):
@@ -42,7 +43,7 @@ def detrend_data(data, output_arr=None):
     return output_arr
 
 
-def dask_detrend_data(data, output_arr, cache_path=None, available_mem=16e9):
+def dask_detrend_data(data, output_arr):
     """
     Detrend data using a linear fit.
 
@@ -63,27 +64,24 @@ def dask_detrend_data(data, output_arr, cache_path=None, available_mem=16e9):
     This is a very expensive operation if using a large dataset.  May slow down
     if forced to spill onto the disk cache
     """
-    cache = chest.Chest(available_memory=available_mem,
-                        path=cache_path)
-    with dask.set_options(cache=cache):
-        dummy_time = np.arange(data.shape[0])
+    dummy_time = np.arange(data.shape[0])
 
-        x = dummy_time[:, None]
-        y = data
-        ymean = data.mean(axis=0)
-        xmean = dummy_time.mean()
+    x = dummy_time[:, None]
+    y = data
+    ymean = data.mean(axis=0)
+    xmean = dummy_time.mean()
 
-        xanom = x - xmean
-        yanom = y - ymean
-        covxy = da.sum(xanom * yanom, axis=0)
-        xvar = x.var(axis=0, ddof=1)
-        beta = covxy/xvar
-        intercept = ymean - xmean*beta
+    xanom = x - xmean
+    yanom = y - ymean
+    covxy = da.sum(xanom * yanom, axis=0)
+    xvar = x.var(axis=0, ddof=1)
+    beta = covxy/xvar
+    intercept = ymean - xmean*beta
 
-        predict = beta*x + intercept
-        detrended = data - predict
+    predict = beta*x + intercept
+    detrended = data - predict
 
-        da.store(detrended, output_arr)
+    da.store(detrended, output_arr)
 
     return output_arr
 
@@ -215,16 +213,16 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
         pcs, full_svals, eofs = da.linalg.svd_compressed(data, num_eigs)
 
         out_svals = np.zeros(num_eigs)
-        out_eofs = np.zeros(num_eigs, data.shape[1])
-        out_pcs = np.zeros(data.shape[0], num_eigs)
+        out_eofs = np.zeros((num_eigs, data.shape[1]))
+        out_pcs = np.zeros((data.shape[0], num_eigs))
         da.store([eofs, full_svals, pcs], [out_eofs, out_svals, out_pcs])
 
         out_eofs = out_eofs.T
         out_pcs = out_pcs.T
 
         if var_stats_dict is not None:
-            _, full_svals, _ = da.linalg.svd(data)
-            full_svals.compute()
+            logger.warning('Cannot currently provide variance statistics for '
+                           'EOFs computed on a dask array.')
 
     else:
         eofs, full_svals, pcs = svd(data[:].T, full_matrices=False)

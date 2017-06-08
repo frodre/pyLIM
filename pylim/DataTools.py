@@ -5,19 +5,25 @@ Author: Andre Perkins
 """
 
 import tables as tb
+import dask
 import dask.array as da
 import numpy as np
 import os.path as path
 import warnings
 import netCDF4 as ncf
 import numexpr as ne
-import multiprocessing as mp
+import chest
 import cPickle as cpk
+import logging
 
 from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
                   dask_detrend_data, calc_eofs
 
 tb.parameters.NODE_CACHE_SLOTS = 0
+CACHE = chest.Chest(available_memory=30e9,
+                    path='/home/katabatic/wperkins/scratch')
+dask.set_options(cache=CACHE)
+logger = logging.getLogger(__name__)
 
 
 class BaseDataObject(object):
@@ -88,6 +94,8 @@ class BaseDataObject(object):
             compression. Only considered when data is not masked.
         """
 
+        logger.info('Initializing data object from {}'.format(self.__class__))
+
         assert data.ndim <= 4, 'Maximum of 4 dimensions are allowed.'
         self._full_shp = data.shape
         self.data_dtype = data.dtype
@@ -117,9 +125,12 @@ class BaseDataObject(object):
         # Match dimension coordinate vectors
         if dim_coords is not None:
             if self.TIME in dim_coords.keys():
-                # Assert leading dimension is sampling dimension
-                assert dim_coords[self.TIME][0] == 0, 'Sampling dimension must'\
-                    ' always be the leading dimension if provided.'
+                if dim_coords[self.TIME][0] != 0:
+                    logger.error('Non-leading time dimension encountered in '
+                                 'dim_coords.')
+                    raise ValueError('Sampling dimension must always be the '
+                                     'leading dimension if provided.')
+
                 self._leading_time = True
                 self._time_shp = [data.shape[0]]
                 self._spatial_shp = data.shape[1:]
@@ -137,33 +148,55 @@ class BaseDataObject(object):
 
         self._flat_spatial_shp = [np.product(self._spatial_shp)]
 
+        logger.info('Time shape: {}'.format(self._time_shp))
+        logger.info('Spatial shape: {}\n'.format(self._spatial_shp))
+        logger.info('Flattened spatial length: '
+                    '{}'.format(self._flat_spatial_shp))
+
         # Check to see if data input is a compressed version
         compressed = False
         if valid_data is not None:
             dim_lim = valid_data.ndim
 
-            assert dim_lim <= 3,\
-                'mask should not have more than 3 dimensions.'
-            assert dim_lim == len(self._spatial_shp),\
-                'mask should have same number of spatial dimensions as data'
+            if dim_lim <= 3:
+                logger.error('Valid data has more than 3 dimensions: '
+                             'ndim={}'.format())
+                raise ValueError('Valid data mask should not have more than 3 '
+                                 'dimensions')
+            elif dim_lim != len(self._spatial_shp):
+                logger.error('Valid data dimensions not equivalent to the '
+                             'shape of the spatial field: \n'
+                             'valid_data.ndim={}\n'
+                             '_spatial_shp.ndim={}'.format(dim_lim,
+                                                           self._spatial_shp))
 
             # Check the dimensions of the mask and data to se if compressed
             for dat_dim, mask_dim in zip(self._spatial_shp, valid_data.shape):
-                assert dat_dim <= mask_dim,\
-                    'Valid data array provided should have larger ' +\
-                    'spatial dimension than the masked input data.'
+                if dat_dim > mask_dim:
+                    logger.error('Data dimension greater than mask dimension:'
+                                 '{} > {}'.format(dat_dim, mask_dim))
+                    raise ValueError('Encountered data dimension larger than'
+                                     'equivalent masked dimension.')
+
                 compressed |= dat_dim < mask_dim
 
             # Apply input mask if its spatial dimensions match data
             if not compressed:
                 # multplication broadcasts across leading sampling dimension if
                 # applicable
-                full_valid = np.ones(data.shape, dtype=np.bool) * valid_data
+                full_valid = np.ones_like(data, dtype=np.bool) * valid_data
                 data[~full_valid] = np.nan
+                logger.debug('Mask applied (NaN) to non-compressed data.')
             else:
-                assert np.all(np.isfinite(data)),\
-                    'Previously compressed data should not contain NaN data.'
+                if not np.all(np.isfinite(data)):
+                    logger.error('Data determined to be compressed still '
+                                 'contains non-finite elements.')
+                    raise ValueError('Non-finite value encountered in '
+                                     'compressed data.')
+
                 self._full_shp = self._time_shp + list(valid_data.shape)
+                logger.debug('Compressed data encountered. Full shape: '
+                             '{}'.format(self._full_shp))
 
             self.valid_data = valid_data.flatten()
             self.is_masked = True
@@ -180,18 +213,16 @@ class BaseDataObject(object):
                                          self._flat_spatial_shp)
             else:
                 self.data = data.reshape(self._flat_spatial_shp)
+            logger.debug('Flattening data over spatial dimensions. New shp: '
+                         '{}'.format(self.data.shape))
         else:
             self.data = data
 
-        # I don't think
-        # Initialized here for flattening purposes
-        # if not save_none:
-        #     self.orig_data = self._new_databin(self.data, self._ORIGDATA)
         self._set_curr_data_key(self._ORIGDATA)
 
         # Compress the data if mask is present
         if compressed:
-            self.compressed_data = self.orig_data
+            self.compressed_data = self.data
         elif self.is_masked:
             if not save_none:
                 if self._leading_time:
@@ -208,12 +239,18 @@ class BaseDataObject(object):
             self._set_curr_data_key(self._COMPRESSED)
 
     def _set_curr_data_key(self, key):
+        logger.debug('Setting current data key to: '.format(key))
         self._curr_data_key = key
 
     def _new_empty_databin(self, shape, dtype, name):
         """
         Create an empty backend data container.
         """
+        logger.debug('Creating empty databin: \n'
+                     'shape: {}\n'
+                     'dtype: {}\n'
+                     'name: {}'.format(shape, dtype, name))
+
         new = np.empty(shape, dtype=dtype)
         self._data_bins[name] = new
         return new
@@ -222,12 +259,14 @@ class BaseDataObject(object):
         """
         Create and copy data into a new backend data container.
         """
+        logger.debug('Copying data to databin: {}'.format(name))
         new = np.empty_like(data)
         new[:] = data
         self._data_bins[name] = new
         return new
 
     def _gen_composite_mask(self, data):
+        logger.debug('Generating composite mask from data mask.')
         if self._leading_time:
             composite_mask = data.mask.sum(axis=0) > 0
         else:
@@ -236,6 +275,8 @@ class BaseDataObject(object):
         return composite_mask
 
     def _check_invalid_data(self, data):
+        logger.info('Checking data for invalid elements.')
+
         full_valid = np.isfinite(data)
         if self._fill_value is not None:
             full_valid &= data != self._fill_value
@@ -246,13 +287,18 @@ class BaseDataObject(object):
                 valid_data = full_valid.sum() < self._time_shp[0]
             else:
                 valid_data = full_valid
+
+            logger.debug('Found invalid values. {:d} spatial elements masked.'
+                         ''.format(np.logical_not(valid_data).sum()))
         else:
+            logger.debug('No invalid values encountered.')
             masked = False
             valid_data = None
 
         return masked, valid_data
 
     def _data_masking(self, data):
+        logger.info('Performing masking and invalid data checks.')
         if np.ma.is_masked(data[0]):
             masked = True
             composite_mask = self._gen_composite_mask(data)
@@ -263,10 +309,11 @@ class BaseDataObject(object):
         return masked, valid_data
 
     def _compress_to_valid_data(self, data, mask, out_arr=None):
+        logger.info('Compressing data to valid spatial locations.')
         if self._leading_time:
-            compress_axis=1
+            compress_axis = 1
         else:
-            compress_axis=None
+            compress_axis = None
 
         out_arr = np.compress(mask, data, axis=compress_axis, out=out_arr)
         return out_arr
@@ -293,7 +340,9 @@ class BaseDataObject(object):
         ndarray
             Full decompressed grid filled with NaN values in masked locations.
         """
-        assert self.is_masked, 'Can only inflate compressed data.'
+        if not self.is_masked:
+            logger.warning('Cannot inflate uncompressed data.')
+            return None
 
         if data is None:
             data = self.data
@@ -306,14 +355,20 @@ class BaseDataObject(object):
             full[self.valid_data] = data
 
         if reshape_orig:
-            return full.reshape(self._full_shp)
+            full = full.reshape(self._full_shp)
+
+        logger.debug('Inflated grid shape: {}'.format(full.shape))
 
         return full
 
     def calc_running_mean(self, window_size, year_len, save=True):
+        logger.info('Filtering data using running mean...')
+        logger.debug('window_size = {:d}, year_len = {:d}'.format(window_size,
+                                                                  year_len))
 
         # TODO: year_len should eventually be a property determined during init
         if not self._leading_time:
+            logger.error('Running mean requires leading time dimension.')
             raise ValueError('Can only perform a running mean when data has a '
                              'leading sampling dimension.')
 
@@ -339,8 +394,9 @@ class BaseDataObject(object):
         return self.data
 
     # TODO: Use provided time coordinates to determine year size
-    # TODO: Determine if climo needs to be tied to object
     def calc_anomaly(self, yr_size, save=True, climo=None):
+        logger.info('Centering data and saving climatology...')
+        logger.debug('yr_size = {:d}'.format(yr_size))
         if not self._leading_time:
             raise ValueError('Can only perform anomaly calculation with a '
                              'specified leading sampling dimension')
@@ -358,6 +414,7 @@ class BaseDataObject(object):
         return self.data
 
     def detrend_data(self, save=True):
+        logger.info('Detrending data...')
         if not self._leading_time:
             raise ValueError('Can only perform detrending with a specified '
                              'leading sampling dimension')
@@ -372,9 +429,10 @@ class BaseDataObject(object):
         return self.data
 
     def area_weight_data(self, save=True):
+        logging.info('Area weighting data by latitude...')
         if self.LAT not in self._dim_idx.keys():
-            warnings.warn('No latitude dimension specified. No area weighting'
-                          'was performed.')
+            logger.warning('No latitude dimension specified. No area weighting'
+                           'was performed.')
             return self.data
 
         if save and not self._save_none:
@@ -395,6 +453,7 @@ class BaseDataObject(object):
         self._set_curr_data_key(self._AWGHT)
 
     def eof_proj_data(self, num_eigs, save=True):
+        logger.info('Projecting data into leading {:d} EOFs'.format(num_eigs))
         if not self._leading_time:
             raise ValueError('Can only perform eof calculation with a '
                              'specified leading sampling dimension')
@@ -420,6 +479,7 @@ class BaseDataObject(object):
         return self.data
 
     def get_dim_coords(self, keys):
+        logger.info('Retrieving dim_coords for: {}'.format(keys))
         dim_coords = {}
 
         for key in keys:
@@ -429,6 +489,7 @@ class BaseDataObject(object):
         return dim_coords
 
     def get_coordinate_grids(self, keys, compressed=True):
+        logger.info('Retrieving coordinate grids for: {}'.format(keys))
         grids = {}
 
         for key in keys:
@@ -459,12 +520,15 @@ class BaseDataObject(object):
 
     # TODO: figure out consisntent state booleans is_detrended, etc.
     def reset_data(self, key):
+        logger.info('Resetting data to: {}'.format(key))
         try:
             self.data = self._data_bins[key]
             if self._leading_time:
                 # running mean alters the time TODO: check that this works
                 self._time_shp = [self.data.shape[0]]
         except KeyError:
+            logger.error('Could not find {} in initialized '
+                         'databins.'.format(key))
             raise KeyError('Key {} not saved.  Could not reset self.data.')
 
         return self.data
@@ -473,6 +537,8 @@ class BaseDataObject(object):
         return self._leading_time
 
     def save_dataobj_pckl(self, filename):
+
+        logger.info('Saving data object to file: {}'.format(filename))
 
         tmp_dimcoord = self._dim_coords[self.TIME]
         tmp_time = tmp_dimcoord[1]
@@ -488,6 +554,10 @@ class BaseDataObject(object):
     @classmethod
     def from_netcdf(cls, filename, var_name, **kwargs):
 
+        logging.info('Loading data object from netcdf: \n'
+                     'file = {}\n'
+                     'var_name = {}'.format(filename, var_name))
+
         with ncf.Dataset(filename, 'r') as f:
             data = f.variables[var_name][:]
             coords = {BaseDataObject.LAT: f.variables['lat'][:],
@@ -499,6 +569,7 @@ class BaseDataObject(object):
                 coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units,
                                                            calendar=cal)
             except AttributeError:
+                logger.debug('No calendar attribute found in netCDF.')
                 coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
                 cal=None
 
@@ -513,10 +584,16 @@ class BaseDataObject(object):
     @classmethod
     def from_hdf5(cls, filename, var_name, data_dir='/'):
 
+        logging.info('Loading data object from HDF5: \n'
+                     'file = {}\n'
+                     'var_name = {}'.format(filename, var_name))
+
         with tb.open_file(filename, 'r') as f:
 
             data = f.get_node(data_dir, name=var_name)
             if data.attrs.masked:
+                logger.debug('Fill value = {:2.3e}.  '
+                             'Loading into masked array.')
                 fill_val = data.attrs.fill_value
                 data = data[:]
                 mask = data == fill_val
@@ -537,6 +614,9 @@ class BaseDataObject(object):
 
     @classmethod
     def from_pickle(cls, filename):
+        logging.info('Loading data object from pickle.\n'
+                     'file = {}'.format(filename))
+
         with open(filename, 'r') as f:
             dobj = cpk.load(f)
 
@@ -594,12 +674,10 @@ class Hdf5DataObject(BaseDataObject):
         read from disk.
         """
 
-        assert type(h5file) == tb.File,\
-            'Hdf5DataObject only works with PyTables.File types'
-        assert h5file.mode in ['a', 'w'], \
-            'h5file is not write enabled'
-        assert h5file.isopen,\
-            'h5file is closed and therefore not write enabled'
+        if type(h5file) != tb.File:
+            logger.error('Invalid HDF5 file encountered: '
+                         'type={}'.format(type(h5file)))
+            raise ValueError('Input HDF5 file must be opened using pytables.')
 
         self.h5f = h5file
         self._default_grp = None
@@ -613,6 +691,7 @@ class Hdf5DataObject(BaseDataObject):
         else:
             self._chunk_shape = chunk_shape
 
+        logger.debug('Dask array chunk shape: {}'.format(self._chunk_shape))
         data = da.from_array(data, chunks=self._chunk_shape)
 
         super(Hdf5DataObject, self).__init__(data,
@@ -627,11 +706,16 @@ class Hdf5DataObject(BaseDataObject):
                                               self.data.shape,
                                               self.data.dtype)
             self._chunk_shape = chunk_shp
+            logger.debug('Current chunk shape: {}'.format(chunk_shp))
             self.data = da.from_array(self.data, chunks=self._chunk_shape)
         super(Hdf5DataObject, self)._set_curr_data_key(key)
 
     # Create backend data container
     def _new_empty_databin(self, shape, dtype, name):
+        logger.debug('Creating empty HDF5 databin:\n'
+                     'shape: {}\n'
+                     'dtype: {}\n'
+                     'name: {}'.format(shape, dtype, name))
         new = empty_hdf5_carray(self.h5f,
                                 self._default_grp,
                                 name,
@@ -642,6 +726,7 @@ class Hdf5DataObject(BaseDataObject):
         return new
 
     def _new_databin(self, data, name):
+        logger.debug('Copying data to HDF5 databin: {}'.format(name))
         new = self._new_empty_databin(data.shape, data.dtype, name)
         da.store(data, new)
         self._data_bins[name] = new
@@ -652,12 +737,19 @@ class Hdf5DataObject(BaseDataObject):
         """
         Determine default chunk size for dask array operations.
         
+        Parameters
+        ----------
         shape: tuple<int>
             Shape of the data to be chunked.
-        dype: numpy.dtype
+        dtype: numpy.dtype
             Datatype of the data to be chunked
         size: int
             Size (in MB) of the desired chunk
+        
+        Returns
+        -------
+        tuple
+            Chunk shape for data and given size.
         """
         if leading_time:
             sptl_size = np.product(shape[1:]) * dtype.itemsize
@@ -677,6 +769,7 @@ class Hdf5DataObject(BaseDataObject):
         return chunk
 
     def _check_invalid_data(self, data):
+        logger.info('Checking dask array data for invalid elements.')
 
         finite_data = da.isfinite(data)
         not_filled_data = data != self._fill_value
@@ -696,6 +789,7 @@ class Hdf5DataObject(BaseDataObject):
         return masked, valid_data
 
     def _compress_to_valid_data(self, data, valid, out_arr):
+        logger.info('Compressing dask array data to valid spatial locations.')
         if self._leading_time:
             compress_axis = 1
         else:
@@ -705,12 +799,10 @@ class Hdf5DataObject(BaseDataObject):
         da.store(compressed_data, out_arr)
         return out_arr
 
-    #TODO: Need to tie this to some more formal configuration
+    # TODO: Need to tie this to some more formal configuration
     @staticmethod
     def _detrend_func(data, output_arr=None, **kwargs):
-        return dask_detrend_data(data, output_arr=output_arr,
-                                 cache_path='/home/katabatic/wperkins/scratch',
-                                 available_mem=30e9)
+        return dask_detrend_data(data, output_arr=output_arr)
 
     def calc_running_mean(self, window_size, year_len, save=True):
 
@@ -718,6 +810,8 @@ class Hdf5DataObject(BaseDataObject):
             orig = self._chunk_shape
             new_chunk = tuple([window_size*50] + list(orig[1:]))
             self.data = self.data.rechunk(new_chunk)
+            logger.debug('New dask chunk shape for running mean: '
+                         '{}'.format(new_chunk))
 
         res = super(Hdf5DataObject, self).calc_running_mean(window_size,
                                                             year_len,
@@ -740,8 +834,13 @@ class Hdf5DataObject(BaseDataObject):
             A PyTables group object or string path to set as the default group
             for the HDF5 backend to store databins.
         """
-        assert type(group) == tb.Group or type(group) == str, \
-            'default_grp must be of type tb.Group or a path string'
+        if not type(group) == tb.Group and not type(group) == str:
+            logger.error('Invalid group type encountered: '
+                         '{}'.format(type(group)))
+            raise ValueError('Input group must be of type PyTables.Group '
+                             'or str.')
+
+        # This is very hard to understand :/ so TODO: simplify
         try:
             self._default_grp = self.h5f.get_node(group)
             try:
@@ -761,6 +860,9 @@ class Hdf5DataObject(BaseDataObject):
     @classmethod
     def from_netcdf(cls, filename, var_name, h5file):
 
+        logging.info('Loading data object from netcdf: \n'
+                     'file = {}\n'
+                     'var_name = {}'.format(filename, var_name))
         with ncf.Dataset(filename, 'r') as f:
             # TODO: Figure out why multiprocessing dask arrays fail on netcdf
             data = f.variables[var_name][:]
@@ -777,9 +879,11 @@ class Hdf5DataObject(BaseDataObject):
 
     @classmethod
     def from_hdf5(cls, filename, var_name, h5file, data_dir='/'):
+        logging.info('Loading data object from HDF5: \n'
+                     'file = {}\n'
+                     'var_name = {}'.format(filename, var_name))
 
         with tb.open_file(filename, 'r') as f:
-
             data = f.get_node(data_dir, name=var_name)
             try:
                 fill_val = data.attrs.fill_value
@@ -949,12 +1053,10 @@ def posterior_ncf_to_data_obj(filename, var_name, h5file=None):
 
         if h5file is not None:
             return Hdf5DataObject(data, h5file, dim_coords=coords,
-                                  force_flat=True,
-                                  is_run_mean=True)
+                                  force_flat=True)
 
         else:
-            return BaseDataObject(data, dim_coords=coords, force_flat=True,
-                                  is_run_mean=True)
+            return BaseDataObject(data, dim_coords=coords, force_flat=True)
 
     finally:
         f.close()
@@ -970,11 +1072,26 @@ def posterior_npz_to_data_obj(filename):
               BaseDataObject.LON: (1, lon),
               BaseDataObject.TIME: (0, f['years'])}
 
-    return BaseDataObject(data, dim_coords=coords, force_flat=True,
-                          is_run_mean=True, is_anomaly=True)
+    return BaseDataObject(data, dim_coords=coords, force_flat=True)
 
 
 def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
+    """
+    Transfer netCDF variable and latitude/longitude/time dimensions to an
+    HDF5 container.
+    
+    Parameters
+    ----------
+    infile: str
+        Path to netCDF file
+    var_name: str
+        Variable name to transfer from netCDF file.
+    outfile: str
+        Path for output HDF5 file. Uses PyTables storage format.
+    data_dir: str, optional
+        The directory in the HDF5 file to store the data at.  Defaults to the 
+        root path ('/').
+    """
     f = ncf.Dataset(infile, 'r')
     outf = tb.open_file(outfile, 'w', filters=tb.Filters(complib='blosc',
                                                          complevel=5))
