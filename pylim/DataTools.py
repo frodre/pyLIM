@@ -47,6 +47,7 @@ class BaseDataObject(object):
     LEVEL = 'level'
     LAT = 'lat'
     LON = 'lon'
+    EQUIVLAT = 'equiv_lat'
 
     # Static databin keys
     _COMPRESSED = 'compressed'
@@ -67,7 +68,7 @@ class BaseDataObject(object):
 
     def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
                  save_none=False, time_units=None, time_cal=None,
-                 fill_value=None):
+                 fill_value=None, rotated_pole=False):
         """
         Construction of a DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -91,6 +92,8 @@ class BaseDataObject(object):
         fill_value: float
             Value to be considered invalid data during the mask and 
             compression. Only considered when data is not masked.
+        rotated_pole: bool, optional
+            Whether or not the grid is on a rotated 
         """
 
         logger.info('Initializing data object from {}'.format(self.__class__))
@@ -101,6 +104,7 @@ class BaseDataObject(object):
         self.forced_flat = force_flat
         self.time_units = time_units
         self.time_cal = time_cal
+        self._rotated_pole = rotated_pole
         self._fill_value = fill_value
         self._save_none = save_none
         self._data_bins = {}
@@ -143,7 +147,19 @@ class BaseDataObject(object):
             self._leading_time = False
             self._time_shp = []
             self._spatial_shp = self._full_shp
-            self._dim_dix = None
+            self._dim_idx = None
+
+        # Rough method to provide lats for area weighting
+        if rotated_pole:
+            lat_idx = self._dim_idx[self.LAT]
+            lat = self._dim_coords.get(self.LAT, None)
+            if lat is not None:
+                nlats = self._full_shp[lat_idx]
+                bnds = np.linspace(-90, 90, nlats+1)
+                centers = (bnds[:-1] + bnds[1:]) / 2.
+                equiv_dim_coord = (lat_idx, centers)
+                self._dim_coords[self.EQUIVLAT] = equiv_dim_coord
+                self._dim_idx[self.EQUIVLAT] = lat_idx
 
         self._flat_spatial_shp = [np.product(self._spatial_shp)]
 
@@ -530,7 +546,13 @@ class BaseDataObject(object):
             self.area_weighted = self._new_empty_databin(self.data.shape,
                                                          self.data.dtype,
                                                          self._AWGHT)
-        lats = self.get_coordinate_grids([self.LAT])[self.LAT]
+
+        # If pole is rotated the latitude weighting will be off, need latitude
+        # on an equivalent unrotated grid to properly weight by area
+        if self._rotated_pole:
+            lats = self.get_coordinate_grids([self.EQUIVLAT])[self.EQUIVLAT]
+        else:
+            lats = self.get_coordinate_grids([self.LAT])[self.LAT]
         scale = np.sqrt(abs(np.cos(np.radians(lats))))
 
         if is_dask_array(self.data):
@@ -673,7 +695,7 @@ class BaseDataObject(object):
                        time_units=times.units, time_cal=cal, **kwargs)
 
     @classmethod
-    def from_hdf5(cls, filename, var_name, data_dir='/'):
+    def from_hdf5(cls, filename, var_name, data_dir='/', **kwargs):
 
         logging.info('Loading data object from HDF5: \n'
                      'file = {}\n'
@@ -701,7 +723,7 @@ class BaseDataObject(object):
             coords[BaseDataObject.TIME] = (times.attrs.index,
                                            ncf.num2date(times[:],
                                                         times.attrs.units))
-            return cls(data, dim_coords=coords, force_flat=True)
+            return cls(data, dim_coords=coords, force_flat=True, **kwargs)
 
     @classmethod
     def from_pickle(cls, filename):
@@ -724,7 +746,7 @@ class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
                  force_flat=False, fill_value=None, chunk_shape=None,
-                 default_grp='/data'):
+                 default_grp='/data', rotated_pole=False):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -789,7 +811,10 @@ class Hdf5DataObject(BaseDataObject):
                                              dim_coords=dim_coords,
                                              valid_data=valid_data,
                                              force_flat=force_flat,
-                                             fill_value=fill_value)
+                                             fill_value=fill_value,
+                                             rotated_pole=rotated_pole)
+
+        self._eof_stats = None
 
     def _set_curr_data_key(self, key):
         if not hasattr(self.data, 'dask'):
@@ -949,7 +974,7 @@ class Hdf5DataObject(BaseDataObject):
                                                       createparents=True)
 
     @classmethod
-    def from_netcdf(cls, filename, var_name, h5file):
+    def from_netcdf(cls, filename, var_name, h5file, **kwargs):
 
         logging.info('Loading data object from netcdf: \n'
                      'file = {}\n'
@@ -966,10 +991,11 @@ class Hdf5DataObject(BaseDataObject):
                 if key in coords.keys():
                     coords[key] = (i, coords[key])
 
-            return cls(data, h5file, dim_coords=coords, force_flat=True)
+            return cls(data, h5file, dim_coords=coords, force_flat=True,
+                       **kwargs)
 
     @classmethod
-    def from_hdf5(cls, filename, var_name, h5file, data_dir='/'):
+    def from_hdf5(cls, filename, var_name, h5file, data_dir='/', **kwargs):
         logging.info('Loading data object from HDF5: \n'
                      'file = {}\n'
                      'var_name = {}'.format(filename, var_name))
@@ -999,7 +1025,7 @@ class Hdf5DataObject(BaseDataObject):
                                            ncf.num2date(times[:],
                                                         times.attrs.units))
             return cls(data, h5file, dim_coords=coords, force_flat=True,
-                       fill_value=fill_val)
+                       fill_value=fill_val, **kwargs)
 
 
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
