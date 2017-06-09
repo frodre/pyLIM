@@ -134,11 +134,12 @@ class LIM(object):
         etime = time.time() - stime
         logger.info('EOF truncation finished in {:2.2f}s'.format(etime))
 
-        logger.debug(('\nEOF statistics:\n'
-                      'Total variance: {:2.4e}\n'
-                      'Var explained (ret modes): {:2.4e}'
-                      ).format(self._eof_var_stats['total_var'],
-                               self._eof_var_stats['var_expl_by_ret']))
+        if self._eof_var_stats is not None:
+            logger.debug(('\nEOF statistics:\n'
+                          'Total variance: {:2.4e}\n'
+                          'Var explained (ret modes): {:2.4e}'
+                          ).format(self._eof_var_stats['total_var'],
+                                   self._eof_var_stats['var_expl_by_ret']))
 
         x0 = train_data[:, 0:-nelem_in_tau1]
         x1 = train_data[:, nelem_in_tau1:]
