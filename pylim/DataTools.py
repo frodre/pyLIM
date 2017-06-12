@@ -639,6 +639,7 @@ class BaseDataObject(object):
             if self._leading_time:
                 # running mean alters the time TODO: check that this works
                 self._time_shp = [self.data.shape[0]]
+            self._set_curr_data_key(key)
         except KeyError:
             logger.error('Could not find {} in initialized '
                          'databins.'.format(key))
