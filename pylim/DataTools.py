@@ -536,7 +536,7 @@ class BaseDataObject(object):
         ndarray-like
             Area-weighted data
         """
-        logging.info('Area weighting data by latitude...')
+        logger.info('Area weighting data by latitude...')
         if self.LAT not in self._dim_idx.keys():
             logger.warning('No latitude dimension specified. No area weighting'
                            'was performed.')
