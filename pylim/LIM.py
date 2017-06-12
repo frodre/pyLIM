@@ -22,20 +22,35 @@ logger = logging.getLogger(__name__)
 
 def _calc_m(x0, xt, tau=1):
     """Calculate either L or G for forecasting (using nomenclature
-    from Newman 2013"""
+    from Newman 2013
+    
+    Parameters
+    ----------
+    x0: ndarray
+        State at time=0.  MxN where M is number of samples, and N is the 
+        number of features.
+    xt: ndarray
+        State at time=tau.  MxN where M is number of samples, and N is the 
+        number of fatures.
+    tau: float
+        lag time (in units of tau) that we are calculating G for.  This is 
+        used to check that all modes of L are damped.
+        
+        
+    """
     
     # These represent the C(tau) and C(0) covariance matrices
     #    Note: x is an anomaly vector, no division by N-1 because it's undone
     #    in the inversion anyways
     
-    x0x0 = np.dot(x0, x0.T)
-    x0xt = np.dot(xt, x0.T)
+    x0x0 = np.dot(x0.T, x0)
+    x0xt = np.dot(xt.T, x0)
 
     # Calculate the mapping term G_tau
     G = np.dot(x0xt, pinv(x0x0))
 
     # Calculate the forcing matrix to check that all modes are damped
-    L = (1/tau) * np.log(G)
+    L = (1./tau) * np.log(G)
     Leigs = eigvals(L)
 
     if np.any(Leigs.real >= 0):
@@ -121,8 +136,8 @@ class LIM(object):
         self._nelem_in_tau1 = nelem_in_tau1
         self._eof_var_stats = {}
 
-        x0 = calib_data[:, 0:-nelem_in_tau1]
-        x1 = calib_data[:, nelem_in_tau1:]
+        x0 = calib_data[0:-nelem_in_tau1, :]
+        x1 = calib_data[nelem_in_tau1:, :]
 
         self.G_1 = _calc_m(x0, x1, tau=1)
 
