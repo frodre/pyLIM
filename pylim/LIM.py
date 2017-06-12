@@ -77,9 +77,7 @@ def _create_h5_fcast_grps(h5f, dest, atom, shape, fcast_times):
 class LIM(object):
     """Linear inverse forecast model.
     
-    This class uses a calibration dataset to make simple linear forecasts. 
-    Can perform forecasts using random or contiguous resampling, or with
-    separate calibration and forecast datasets.
+    This class uses a calibration dataset to make simple linear forecasts.
     
     Notes
     -----
@@ -95,7 +93,7 @@ class LIM(object):
     ....
     """
 
-    def __init__(self, calib_data, fcast_components, nelem_in_tau1, h5file=None):
+    def __init__(self, calib_data, nelem_in_tau1, h5file=None):
         """
         Parameters
         ----------
@@ -104,8 +102,6 @@ class LIM(object):
             a 2D MxN matrix where M (rows) represent the sampling dimension and
             N(columns) represents the feature dimension (e.g. spatial grid
             points).
-        fcast_components: int
-            Number of principal components to include in forecast calculations
         nelem_in_tau1: int
             Number of time samples that span tau=1.  E.g. for monthly data when
             a forecast tau is equivalent to 1 year, nelem_in_tau should be 12.
@@ -122,27 +118,11 @@ class LIM(object):
 
         self._h5file = h5file
         self._from_precalib = False
-        self._neigs = fcast_components
         self._nelem_in_tau1 = nelem_in_tau1
         self._eof_var_stats = {}
 
-        logger.info('Calculating EOFs on calibration data.')
-        stime = time.time()
-        self._eofs = calc_eofs(calib_data, fcast_components,
-                               var_stats_dict=self._eof_var_stats)
-        train_data = np.dot(self._eofs.T, calib_data.T)
-        etime = time.time() - stime
-        logger.info('EOF truncation finished in {:2.2f}s'.format(etime))
-
-        if self._eof_var_stats is not None:
-            logger.debug(('\nEOF statistics:\n'
-                          'Total variance: {:2.4e}\n'
-                          'Var explained (ret modes): {:2.4e}'
-                          ).format(self._eof_var_stats['total_var'],
-                                   self._eof_var_stats['var_expl_by_ret']))
-
-        x0 = train_data[:, 0:-nelem_in_tau1]
-        x1 = train_data[:, nelem_in_tau1:]
+        x0 = calib_data[:, 0:-nelem_in_tau1]
+        x1 = calib_data[:, nelem_in_tau1:]
 
         self.G_1 = _calc_m(x0, x1, tau=1)
 
@@ -205,7 +185,7 @@ class LIM(object):
         num_fcast_times = len(fcast_leads)
 
         # Create output locations for our forecasts
-        fcast_out_shp = (num_fcast_times, self._neigs, t0_data.shape[0])
+        fcast_out_shp = (num_fcast_times, t0_data.shape[0], t0_data.shape[1])
 
         if self._h5file is not None and use_h5:
             # Create forecast groups
@@ -218,27 +198,120 @@ class LIM(object):
         else:
             fcast_out = np.zeros(fcast_out_shp)
 
-        # Calibrate the LIM with (J=neigs) EOFs from training data
-        eofs = self._eofs     # eofs is NxJ
-
-        # Project our testing data into eof space
-        proj_t0_data = np.dot(eofs.T, t0_data[:].T)              # JxM^
-
         for i, tau in enumerate(fcast_leads):
             g = self.G_1**tau
-            xf = np.dot(g, proj_t0_data)
+            xf = np.dot(g, t0_data.T)
             if use_h5:
-                fcast_out[i][:] = xf
+                fcast_out[i][:] = xf.T
             else:
-                fcast_out[i] = xf
+                fcast_out[i] = xf.T
 
-        # Save EOFs to HDF5 file if needed
-        if self._h5file is not None and use_h5:
-            eof_out = Dt.var_to_hdf5_carray(self._h5file, '/data', 'eofs', eofs)
-        else:
-            eof_out = eofs
+        return fcast_out
 
-        return fcast_out, eof_out
+
+class ParamReducedLIM(LIM):
+    """Linear inverse forecast model.
+    
+    This class uses a calibration dataset to make simple linear forecasts.
+    Calibration data input into this class will be reduced to the specified
+    number of EOFs.
+    
+    Notes
+    -----
+    Based on the LIM described by M. Newman (2013) [1].  Right now it
+    assumes the use of monthly data (i.e. each timestep should represent a
+    single month).
+    
+    References
+    ----------
+    .. [1] Newman, M. (2013), An Empirical Benchmark for Decadal Forecasts of 
+       Global Surface Temperature Anomalies, J. Clim., 26(14), 5260–5269, 
+       doi:10.1175/JCLI-D-12-00590.1.
+    ....
+    """
+
+    def __init__(self, calib_data, nelem_in_tau1, num_eofs, h5file=None):
+        """
+        Parameters
+        ----------
+        calib_data: ndarray
+            Data for calibrating the LIM.  Expects
+            a 2D MxN matrix where M (rows) represent the sampling dimension and
+            N(columns) represents the feature dimension (e.g. spatial grid
+            points).
+        num_eofs: int
+            Number of principal components to include in forecast calculations
+        nelem_in_tau1: int
+            Number of time samples that span tau=1.  E.g. for monthly data when
+            a forecast tau is equivalent to 1 year, nelem_in_tau should be 12.
+        h5file: HDF5_Object, Optional
+            File object to store LIM output.  It will create a series of
+            directories under the given group
+        """
+
+        self._neigs = num_eofs
+
+        logger.info('Calculating EOFs on calibration data.')
+        stime = time.time()
+        self._eofs = calc_eofs(calib_data, num_eofs,
+                               var_stats_dict=self._eof_var_stats)
+        eof_calib_data = np.dot(self._eofs.T, calib_data.T)
+        etime = time.time() - stime
+        logger.info('EOF truncation finished in {:2.2f}s'.format(etime))
+
+        if self._eof_var_stats is not None:
+            logger.debug(('\nEOF statistics:\n'
+                          'Total variance: {:2.4e}\n'
+                          'Var explained (ret modes): {:2.4e}'
+                          ).format(self._eof_var_stats['total_var'],
+                                   self._eof_var_stats['var_expl_by_ret']))
+
+        super(ParamReducedLIM, self).__init__(eof_calib_data, nelem_in_tau1,
+                                              h5file=h5file)
+
+        if h5file is not None:
+            Dt.var_to_hdf5_carray(h5file, '/data', 'eofs', self._eofs)
+
+    def forecast(self, t0_data, fcast_leads, use_h5=True):
+        """Forecast on provided data.
+        
+        Performs LIM forecast over the times specified by the
+        fcast_times class attribute.  Forecast is performed using G based 
+        on tau=1 lag covariances.
+        
+        t0_data is projected into EOF space based on the calibration data EOFs
+        
+        Parameters
+        ----------
+        t0_data: ndarray
+            Data to forecast from.  Expects
+            a 2D MxN matrix where M (rows) represent the sampling dimension and
+            N(columns) represents the feature dimension (e.g. spatial grid
+            points).
+        fcast_leads: List<int>
+            A list of forecast lead times.  Each value is interpreted as a
+            tau value, for which the forecast matrix is determined as G_1^tau.
+        use_h5: bool
+            Use H5file to store forecast data instead of an ndarray.
+
+        Returns
+        -----
+        fcast_out: ndarray-like
+            LIM forecasts in a KxMxN matrix where K corresponds to each
+            forecast time.
+        """
+
+        # Project our testing data into eof space
+        proj_t0_data = np.dot(t0_data[:], self._eofs)   # MxJ  where J=num_eofs
+
+        fcasts = super(ParamReducedLIM, self).forecast(proj_t0_data,
+                                                       fcast_leads,
+                                                       use_h5=use_h5)
+
+        # forecasts are KxMxJ, expand back into physical space using JxN EOFs
+        expanded_fcasts = [np.dot(fcast_lead, self._eofs)
+                           for fcast_lead in fcasts]
+        return expanded_fcasts
 
 
 class ResampleLIM(LIM):
