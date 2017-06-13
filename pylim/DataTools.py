@@ -223,11 +223,7 @@ class BaseDataObject(object):
 
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
-            if self._leading_time:
-                self.data = data.reshape(self._time_shp +
-                                         self._flat_spatial_shp)
-            else:
-                self.data = data.reshape(self._flat_spatial_shp)
+            self._flatten_curr_data()
             logger.debug('Flattening data over spatial dimensions. New shp: '
                          '{}'.format(self.data.shape))
         else:
@@ -348,11 +344,17 @@ class BaseDataObject(object):
         out_arr = np.compress(valid_mask, data, axis=compress_axis, out=out_arr)
         return out_arr
 
+    def _flatten_curr_data(self):
+        if self._leading_time:
+            self.data = self.data.reshape(self._time_shp + self._flat_spatial_shp)
+        else:
+            self.data = self.data.reshape(self._flat_spatial_shp)
+
     @staticmethod
     def _detrend_func(data, output_arr=None):
         return detrend_data(data, output_arr=output_arr)
 
-    def inflate_full_grid(self, data=None, reshape_orig=False):
+    def inflate_full_grid(self, data=None, expand_axis=-1, reshape_orig=False):
         """
         Returns previously compressed data to its full grid filled with np.NaN
         values.
@@ -360,10 +362,14 @@ class BaseDataObject(object):
         Parameters
         ----------
         data: ndarray like, optional
-            Data to inflate to its original grid size.
+            Data to inflate to its original grid size. If none specified this
+            operates on the current data pointed to by self.data.
+        expand_axis: int, optional
+            Which axis to expand along for the data. Defaults to -1 which is
+            the correct axis when operating on self.data.
         reshape_orig: bool, optional
-            If true use self._full_shp (shape of data used to initialize the
-            DataObject) to reshape the inflated grid output
+            If true it will reshape data to the correct time shape (if
+            applicable) and spatial shape.
 
         Returns
         -------
@@ -374,18 +380,38 @@ class BaseDataObject(object):
             logger.warning('Cannot inflate uncompressed data.')
             return None
 
-        if data is None:
-            data = self.data
+        if data is not None:
+            # Check that this data was compressed from current object
+            elem_expand_axis = data.shape[expand_axis]
+            num_valid_points = self.valid_data.sum()
+            if elem_expand_axis != num_valid_points:
+                logger.error('Incorrect number of elements for compressed '
+                             'data associated with this object.\n'
+                             'data.shape=[{:d}]\n'
+                             'nelem valid data={:d}'
+                             ''.format(elem_expand_axis, num_valid_points))
+                raise ValueError('Input data does not have same length as '
+                                 'number of valid data elements.')
 
-        shp = self._time_shp + list(self.valid_data.shape)
-        full = np.empty(shp) * np.nan
-        if self._leading_time:
-            full[:, self.valid_data] = data
+            shp = list(data.shape)
+            shp[expand_axis] = len(self.valid_data)
+
         else:
-            full[self.valid_data] = data
+            data = self.data
+            shp = self._time_shp + [len(self.valid_data)]
+
+        full = np.empty(shp) * np.nan
+        valid_indices, = np.where(self.valid_data)
+        full_data = np.take(full, valid_indices, axis=expand_axis)
+        full_data[:] = data
 
         if reshape_orig:
-            full = full.reshape(self._full_shp)
+            new_shp = list(shp)
+
+            new_shp.pop(expand_axis)
+            for dim_len in self._spatial_shp[::-1]:
+                new_shp.insert(expand_axis, dim_len)
+            full = full.reshape(new_shp)
 
         logger.debug('Inflated grid shape: {}'.format(full.shape))
 
@@ -571,6 +597,11 @@ class BaseDataObject(object):
             raise ValueError('Can only perform eof calculation with a '
                              'specified leading sampling dimension')
 
+        if len(self.data.shape) > 2:
+            logger.warning('Cannot perform EOF calculation on data with more '
+                           'than 2 dimensions. Flattening data...')
+            self._flatten_curr_data()
+
         if save and not self._save_none:
             new_shp = (self.data.shape[0], num_eigs)
             self.eof_proj = self._new_empty_databin(new_shp,
@@ -601,7 +632,7 @@ class BaseDataObject(object):
 
         return dim_coords
 
-    def get_coordinate_grids(self, keys, compressed=True):
+    def get_coordinate_grids(self, keys, compressed=True, flat=False):
         logger.info('Retrieving coordinate grids for: {}'.format(keys))
         grids = {}
 
@@ -619,13 +650,14 @@ class BaseDataObject(object):
                     grid = np.expand_dims(grid, dim)
 
             grid = np.ones(self._spatial_shp) * grid
-            if self.is_masked or self.forced_flat:
-                grid = grid.flatten()
-
-                if self.is_masked and compressed:
+            if self.is_masked:
+                if compressed:
+                    grid = grid.flatten()
                     grid = grid[self.valid_data]
-                elif self.is_masked:
+                else:
                     grid[self.valid_data] = np.nan
+            elif flat:
+                grid = grid.flatten()
 
             grids[key] = grid
 
