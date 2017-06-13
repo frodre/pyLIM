@@ -221,13 +221,12 @@ class BaseDataObject(object):
         if self.valid_data is not None:
             self.valid_data = self.valid_data.flatten()
 
+        self.data = data
         # Flatten Spatial Dimension if applicable
         if force_flat or self.is_masked:
             self._flatten_curr_data()
             logger.debug('Flattening data over spatial dimensions. New shp: '
                          '{}'.format(self.data.shape))
-        else:
-            self.data = data
 
         self._set_curr_data_key(self._ORIGDATA)
 
