@@ -50,17 +50,18 @@ def _calc_m(x0, xt, tau=1):
     G = np.dot(x0xt, pinv(x0x0))
 
     # Calculate the forcing matrix to check that all modes are damped
-    L = (1./tau) * np.log(G)
-    Leigs = eigvals(L)
+    Geigs = eigvals(G)
+    Leigs = (1./tau) * np.log(Geigs)
 
     if np.any(Leigs.real >= 0):
         logger.debug('L eigenvalues: \n' + str(Leigs))
         raise ValueError('Positive eigenvalues detected in forecast matrix L.')
 
-    if cond(x0x0) > 20:
-        logger.warn(('C_0 condition number is large ({:2.2f}). Too many '
-                     'features (or EOFs) are likely provided and further '
-                     'truncation is suggested.'))
+    # C0_cond = cond(x0x0)
+    # if C0_cond > 20:
+    #     logger.warn(('C_0 condition number is large ({:2.2f}). Too many '
+    #                  'features (or EOFs) are likely provided and further '
+    #                  'truncation is suggested.'.format(C0_cond)))
 
     return G
 
