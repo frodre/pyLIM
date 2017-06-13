@@ -18,10 +18,15 @@ import logging
 from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
                   dask_detrend_data, calc_eofs
 
+# Prevents any nodes in HDF5 file from being cached, saving space
 tb.parameters.NODE_CACHE_SLOTS = 0
+
+# Set the overflow cache for Dask operations
 CACHE = chest.Chest(available_memory=30e9,
                     path='/home/katabatic/wperkins/scratch')
 dask.set_options(cache=CACHE)
+
+# Initialize logging client for this module
 logger = logging.getLogger(__name__)
 
 
@@ -38,8 +43,6 @@ class BaseDataObject(object):
     Right now it is writen to work with 2D spatial data. It assumes that
     the leading dimension is temporal. In the future it might change to
     incorporate 3D spatial fields or just general data.
-
-    Also might incorporate IRIS DataCubes to store data in the future.
     """
 
     # Static names
@@ -58,11 +61,13 @@ class BaseDataObject(object):
     _ANOMALY = 'anomaly'
     _CLIMO = 'climo'
     _EOFPROJ = 'eofproj'
-    _EOFS_TAG = 'eofs'
-    _SVALS_TAG = 'svals'
 
     @staticmethod
     def _match_dims(shape, dim_coords):
+        """
+        Match each dimension key in dim_coords dict to the correct index of the
+        shape.
+        """
         return {key: value[0] for key, value in dim_coords.items()
                 if shape[value[0]] == len(value[1])}
 
@@ -72,7 +77,7 @@ class BaseDataObject(object):
         """
         Construction of a DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
-        is also stored.
+        is stored.
 
         Parameters
         ----------
@@ -654,6 +659,7 @@ class BaseDataObject(object):
                     grid = grid.flatten()
                     grid = grid[self.valid_data]
                 else:
+                    reshape_valid = self.valid_data.reshape(grid.shape)
                     grid[self.valid_data] = np.nan
             elif flat:
                 grid = grid.flatten()
