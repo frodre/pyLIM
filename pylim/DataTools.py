@@ -405,9 +405,13 @@ class BaseDataObject(object):
             shp = self._time_shp + [len(self.valid_data)]
 
         full = np.empty(shp) * np.nan
-        valid_indices, = np.where(self.valid_data)
-        full_data = np.take(full, valid_indices, axis=expand_axis)
-        full_data[:] = data
+        valid_mask = self.valid_data
+        for dim_idx, dim_len in enumerate(shp):
+            if dim_len != self.valid_data.shape[0]:
+                valid_mask = np.expand_dims(valid_mask, dim_idx)
+        valid_mask = np.logical_and(np.ones(shp), valid_mask)
+        print valid_mask.sum()
+        full[valid_mask] = data.flatten()
 
         if reshape_orig:
             new_shp = list(shp)
@@ -654,13 +658,9 @@ class BaseDataObject(object):
                     grid = np.expand_dims(grid, dim)
 
             grid = np.ones(self._spatial_shp) * grid
-            if self.is_masked:
-                if compressed:
-                    grid = grid.flatten()
-                    grid = grid[self.valid_data]
-                else:
-                    reshape_valid = self.valid_data.reshape(grid.shape)
-                    grid[self.valid_data] = np.nan
+            if self.is_masked and compressed:
+               grid = grid.flatten()
+               grid = grid[self.valid_data]
             elif flat:
                 grid = grid.flatten()
 
