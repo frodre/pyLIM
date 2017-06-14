@@ -92,13 +92,22 @@ class BaseDataObject(object):
             or uncompressed version of the input dataset.  Should have the same
             number of dimensions as the data and each  dimension should be
             greater than or equal to the spatial dimensions of data.
-        force_flat: bool
+        force_flat: bool, optional
             Force spatial dimensions to be flattened (1D array)
+        save_none: bool, optional
+            If true, data object will not save any of the intermediate
+            calculation data.
+        time_units: str, optional
+            Units string to be used by netcdf.date2num function for storing
+            datetime objects as a numeric value for output.
+        time_cal: str, optional
+            Calendar string to be used by netcdf.date2num function for storing
+            datetime objects as a numeric value for output
         fill_value: float
             Value to be considered invalid data during the mask and 
             compression. Only considered when data is not masked.
         rotated_pole: bool, optional
-            Whether or not the grid is on a rotated 
+            Whether or not the grid is on a rotated pole grid
         """
 
         logger.info('Initializing data object from {}'.format(self.__class__))
@@ -349,6 +358,9 @@ class BaseDataObject(object):
         return out_arr
 
     def _flatten_curr_data(self):
+        """
+        Flatten the spatial dimension of data pointed to by self.data
+        """
         if self._leading_time:
             self.data = self.data.reshape(self._time_shp + self._flat_spatial_shp)
         else:
@@ -599,8 +611,25 @@ class BaseDataObject(object):
         self.data = self.area_weighted
         self._set_curr_data_key(self._AWGHT)
 
-    def eof_proj_data(self, num_eigs, save=True):
-        logger.info('Projecting data into leading {:d} EOFs'.format(num_eigs))
+    def eof_proj_data(self, num_eofs, save=True):
+        """
+        Calculate spatial EOFs on the data retaining a specified number of
+        modes.
+
+        Parameters
+        ----------
+        num_eofs: int
+            How many modes to retain from the EOF decomposition.
+        save: bool, optional
+            Whether or not to save data in a new databin. (Default is True)
+
+        Returns
+        -------
+        ndarray-like
+            Data projected into EOF basis.  Will have shape of (sampling dim
+            x num EOFs).
+        """
+        logger.info('Projecting data into leading {:d} EOFs'.format(num_eofs))
         if not self._leading_time:
             raise ValueError('Can only perform eof calculation with a '
                              'specified leading sampling dimension')
@@ -611,12 +640,12 @@ class BaseDataObject(object):
             self._flatten_curr_data()
 
         if save and not self._save_none:
-            new_shp = (self.data.shape[0], num_eigs)
+            new_shp = (self.data.shape[0], num_eofs)
             self.eof_proj = self._new_empty_databin(new_shp,
                                                     self.data.dtype,
                                                     self._EOFPROJ)
 
-        self._eofs, self._svals = calc_eofs(self.data, num_eigs,
+        self._eofs, self._svals = calc_eofs(self.data, num_eofs,
                                             var_stats_dict=self._eof_stats)
 
         if is_dask_array(self.data):
@@ -630,7 +659,23 @@ class BaseDataObject(object):
 
         return self.data
 
+    # TODO: Make this return copies of dim_coord information
     def get_dim_coords(self, keys):
+        """
+        Return dim_coord key, value pairs for a specified group of keys.
+
+        Parameters
+        ----------
+        keys: Iterable<str>
+            A list of keys specifying data to retrieve from the dim_coords
+            property
+
+        Returns
+        -------
+        dict
+            A dim_coord dictionary with specified keys.  Values will be a tuple
+            of the dimension index and coordinate values.
+        """
         logger.info('Retrieving dim_coords for: {}'.format(keys))
         dim_coords = {}
 
@@ -641,18 +686,47 @@ class BaseDataObject(object):
         return dim_coords
 
     def get_coordinate_grids(self, keys, compressed=True, flat=False):
+        """
+        Return coordinate grid for spatial dimensions in full, compressed, or
+        flattened form.
+
+        Parameters
+        ----------
+        keys: Iterable<str>
+            A list of keys specifying spatial grids to create.
+        compressed: bool, optional
+            Whether or not to compress the grid when it contains masked values
+        flat: bool, optional
+            Whether or not to return a flattened 1D grid.
+
+        Returns
+        -------
+        dict
+            Requested coordinate grids as key/value pairs
+        """
         logger.info('Retrieving coordinate grids for: {}'.format(keys))
         grids = {}
 
+        if self.TIME in keys:
+            logger.warning('Get_coordinate_grids currently only supports '
+                           'retreival of spatial fields.')
+            keys.pop(self.TIME)
+
         for key in keys:
-            assert key in self._dim_idx.keys(), 'No matching dimension for key'\
-                '({}) was found in data shape'.format(key)
+            if key not in self._dim_idx.keys():
+                raise KeyError('No matching dimension for key ({}) was found.'
+                               ''.format(key))
 
             idx = self._dim_idx[key]
+            # adjust field index for leading time dimension
             if self._leading_time:
                 idx -= 1
+
+            # Get coordinates for current key and copy
             coords = self._dim_coords[key][1]
             grid = np.copy(coords)
+
+            # Expand dimensions for broadcasting
             for dim, _ in enumerate(self._spatial_shp):
                 if dim != idx:
                     grid = np.expand_dims(grid, dim)
@@ -668,7 +742,6 @@ class BaseDataObject(object):
 
         return grids
 
-    # TODO: figure out consisntent state booleans is_detrended, etc.
     def reset_data(self, key):
         logger.info('Resetting data to: {}'.format(key))
         try:
