@@ -71,7 +71,8 @@ class BaseDataObject(object):
         return {key: value[0] for key, value in dim_coords.items()
                 if shape[value[0]] == len(value[1])}
 
-    def __init__(self, data, dim_coords=None, valid_data=None, force_flat=False,
+    def __init__(self, data, dim_coords=None, coord_grids=None,
+                 valid_data=None, force_flat=False,
                  save_none=False, time_units=None, time_cal=None,
                  fill_value=None, rotated_pole=False):
         """
@@ -84,9 +85,13 @@ class BaseDataObject(object):
         data: ndarray
             Input dataset to be used.
         dim_coords: dict(str:(int, ndarray)
-            Demension position and oordinate vector dictionary for supplied
+            Dimension position and oordinate vector dictionary for supplied
             data.  Please use DataObject attributes (e.g. DataObject.TIME)
             for dictionary keys.
+        coord_grids: dict(str:ndarray), optional
+            Full grids of each dimensions coordinates.  If not provided these
+            can be created from dim_coords as long as the grid is regular.
+            If grid is irregular these should be provided for easier plotting.
         valid_data: ndarray (np.bool), optional
             Array corresponding to valid data in the of the input dataset
             or uncompressed version of the input dataset.  Should have the same
@@ -118,6 +123,7 @@ class BaseDataObject(object):
         self.forced_flat = force_flat
         self.time_units = time_units
         self.time_cal = time_cal
+        self._coord_grids = coord_grids
         self._rotated_pole = rotated_pole
         self._fill_value = fill_value
         self._save_none = save_none
@@ -717,26 +723,29 @@ class BaseDataObject(object):
                 raise KeyError('No matching dimension for key ({}) was found.'
                                ''.format(key))
 
-            idx = self._dim_idx[key]
-            # adjust field index for leading time dimension
-            if self._leading_time:
-                idx -= 1
+            if key in self._coord_grids:
+                grid = np.copy(self._coord_grids[key])
+            else:
+                idx = self._dim_idx[key]
+                # adjust field index for leading time dimension
+                if self._leading_time:
+                    idx -= 1
 
-            # Get coordinates for current key and copy
-            coords = self._dim_coords[key][1]
-            grid = np.copy(coords)
+                # Get coordinates for current key and copy
+                coords = self._dim_coords[key][1]
+                grid = np.copy(coords)
 
-            # Expand dimensions for broadcasting
-            for dim, _ in enumerate(self._spatial_shp):
-                if dim != idx:
-                    grid = np.expand_dims(grid, dim)
+                # Expand dimensions for broadcasting
+                for dim, _ in enumerate(self._spatial_shp):
+                    if dim != idx:
+                        grid = np.expand_dims(grid, dim)
 
-            grid = np.ones(self._spatial_shp) * grid
-            if self.is_masked and compressed:
-               grid = grid.flatten()
-               grid = grid[self.valid_data]
-            elif flat:
-                grid = grid.flatten()
+                grid = np.ones(self._spatial_shp) * grid
+                if self.is_masked and compressed:
+                    grid = grid.flatten()
+                    grid = grid[self.valid_data]
+                elif flat:
+                    grid = grid.flatten()
 
             grids[key] = grid
 
@@ -783,9 +792,22 @@ class BaseDataObject(object):
                      'var_name = {}'.format(filename, var_name))
 
         with ncf.Dataset(filename, 'r') as f:
-            data = f.variables[var_name][:]
-            coords = {BaseDataObject.LAT: f.variables['lat'][:],
-                      BaseDataObject.LON: f.variables['lon'][:]}
+            data = f.variables[var_name]
+            lat = f.variables['lat']
+            lon = f.variables['lon']
+
+            if len(lat.shape) > 1:
+                lat_grid = lat
+                lon_grid = lon
+                lat = lat[:, 0]
+                lon = lon[0]
+                grids = {BaseDataObject.LAT: lat_grid[:],
+                         BaseDataObject.LON: lon_grid[:]}
+            else:
+                grids = None
+
+            coords = {BaseDataObject.LAT: lat[:],
+                      BaseDataObject.LON: lon[:]}
             times = f.variables['time']
 
             try:
@@ -795,7 +817,7 @@ class BaseDataObject(object):
             except AttributeError:
                 logger.debug('No calendar attribute found in netCDF.')
                 coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
-                cal=None
+                cal = None
 
             for i, key in enumerate(data.dimensions):
                 if key in coords.keys():
@@ -803,7 +825,8 @@ class BaseDataObject(object):
 
             force_flat = kwargs.pop('force_flat', True)
             return cls(data, dim_coords=coords, force_flat=force_flat,
-                       time_units=times.units, time_cal=cal, **kwargs)
+                       time_units=times.units, time_cal=cal, coord_grids=grids,
+                       **kwargs)
 
     @classmethod
     def from_hdf5(cls, filename, var_name, data_dir='/', **kwargs):
@@ -815,26 +838,35 @@ class BaseDataObject(object):
         with tb.open_file(filename, 'r') as f:
 
             data = f.get_node(data_dir, name=var_name)
-            if data.attrs.masked:
-                logger.debug('Fill value = {:2.3e}.  '
-                             'Loading into masked array.')
+            try:
                 fill_val = data.attrs.fill_value
-                data = data[:]
-                mask = data == fill_val
-                data = np.ma.array(data,
-                                   mask=mask,
-                                   fill_value=data.attrs.fill_value)
-            else:
-                data = data[:]
+            except AttributeError:
+                fill_val = None
+
             lat = f.get_node(data_dir+'lat')
             lon = f.get_node(data_dir+'lon')
-            coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
-                      BaseDataObject.LON: (lon.attrs.index, lon[:])}
+            lat_idx = lat.attrs.index
+            lon_idx = lon.attrs.index
+
+            if len(lat.shape) > 1:
+                lat_grid = lat
+                lon_grid = lon
+                lat = lat[:, 0]
+                lon = lon[0]
+                grids = {BaseDataObject.LAT: lat_grid[:],
+                         BaseDataObject.LON: lon_grid[:]}
+            else:
+                grids = None
+
+            coords = {BaseDataObject.LAT: (lat_idx, lat[:]),
+                      BaseDataObject.LON: (lon_idx, lon[:])}
             times = f.get_node(data_dir+'time')
             coords[BaseDataObject.TIME] = (times.attrs.index,
                                            ncf.num2date(times[:],
                                                         times.attrs.units))
-            return cls(data, dim_coords=coords, force_flat=True, **kwargs)
+            force_flat = kwargs.pop('force_flat', True)
+            return cls(data, dim_coords=coords, force_flat=force_flat,
+                       coord_grids=grids, fill_value=fill_val, **kwargs)
 
     @classmethod
     def from_pickle(cls, filename):
@@ -852,12 +884,41 @@ class BaseDataObject(object):
 
         return dobj
 
+    @classmethod
+    def from_posterior_ncf(cls, filename, var_name, **kwargs):
+
+        with ncf.Dataset(filename, 'r') as f:
+            data = f.variables[var_name][:]
+            coords = {BaseDataObject.LAT: f.variables['lat'][:],
+                      BaseDataObject.LON: f.variables['lon'][:]}
+            times = (0, f.variables['time'][:])
+
+            coords['time'] = times
+            coords['lat'] = (1, coords['lat'])
+            coords['lon'] = (1, coords['lon'])
+
+            return cls(data, dim_coords=coords, **kwargs)
+
+    @classmethod
+    def from_posterior_npc(cls, filename, **kwargs):
+        with np.load(filename) as f:
+            data = f['values'][:]
+            lat = f['lat'][:, 0]
+            lon = f['lon'][0, :]
+            coords = {BaseDataObject.LAT: (1, lat),
+                      BaseDataObject.LON: (1, lon),
+                      BaseDataObject.TIME: (0, f['years'])}
+
+            force_flat = kwargs.pop('force_flat', True)
+            return cls(data, dim_coords=coords, force_flat=force_flat,
+                       **kwargs)
+
 
 class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
                  force_flat=False, fill_value=None, chunk_shape=None,
-                 default_grp='/data', rotated_pole=False):
+                 default_grp='/data', rotated_pole=False, coord_grids=None):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -923,7 +984,8 @@ class Hdf5DataObject(BaseDataObject):
                                              valid_data=valid_data,
                                              force_flat=force_flat,
                                              fill_value=fill_value,
-                                             rotated_pole=rotated_pole)
+                                             rotated_pole=rotated_pole,
+                                             coord_grids=coord_grids)
 
         self._eof_stats = None
 
@@ -1087,56 +1149,16 @@ class Hdf5DataObject(BaseDataObject):
     @classmethod
     def from_netcdf(cls, filename, var_name, h5file, **kwargs):
 
-        logging.info('Loading data object from netcdf: \n'
-                     'file = {}\n'
-                     'var_name = {}'.format(filename, var_name))
-        with ncf.Dataset(filename, 'r') as f:
-            # TODO: Figure out why multiprocessing dask arrays fail on netcdf
-            data = f.variables[var_name][:]
-            coords = {BaseDataObject.LAT: f.variables['lat'][:],
-                      BaseDataObject.LON: f.variables['lon'][:]}
-            times = f.variables['time']
-            coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
-
-            for i, key in enumerate(f.dimensions.iterkeys()):
-                if key in coords.keys():
-                    coords[key] = (i, coords[key])
-
-            return cls(data, h5file, dim_coords=coords, force_flat=True,
-                       **kwargs)
+        return super(Hdf5DataObject, cls).from_netcdf(filename, var_name,
+                                                      h5file=h5file, **kwargs)
 
     @classmethod
     def from_hdf5(cls, filename, var_name, h5file, data_dir='/', **kwargs):
-        logging.info('Loading data object from HDF5: \n'
-                     'file = {}\n'
-                     'var_name = {}'.format(filename, var_name))
 
-        with tb.open_file(filename, 'r') as f:
-            data = f.get_node(data_dir, name=var_name)
-            try:
-                fill_val = data.attrs.fill_value
-            except AttributeError:
-                fill_val = None
-
-            lat = f.get_node(data_dir+'lat')
-            lon = f.get_node(data_dir+'lon')
-            lat_idx = lat.attrs.index
-            lon_idx = lon.attrs.index
-
-            # TODO: need an explicit lat lon loading function that accounts for
-            # this
-            # account for 2d lat lon storage
-            if len(lat.shape) > 1:
-                lat = lat[:, 0]
-                lon = lon[0]
-            coords = {BaseDataObject.LAT: (lat_idx, lat[:]),
-                      BaseDataObject.LON: (lon_idx, lon[:])}
-            times = f.get_node(data_dir+'time')
-            coords[BaseDataObject.TIME] = (times.attrs.index,
-                                           ncf.num2date(times[:],
-                                                        times.attrs.units))
-            return cls(data, h5file, dim_coords=coords, force_flat=True,
-                       fill_value=fill_val, **kwargs)
+        return super(Hdf5DataObject, cls).from_hdf5(filename, var_name,
+                                                    h5file=h5file,
+                                                    data_dir=data_dir,
+                                                    **kwargs)
 
 
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
@@ -1238,71 +1260,6 @@ def empty_hdf5_carray(h5file, group, node, in_atom, shape, **kwargs):
     return out_arr
 
 
-def netcdf_to_data_obj(filename, var_name, h5file=None, force_flat=True):
-
-    f = ncf.Dataset(filename, 'r')
-
-    try:
-        data = f.variables[var_name]
-        coords = {BaseDataObject.LAT: f.variables['lat'][:],
-                  BaseDataObject.LON: f.variables['lon'][:]}
-        times = f.variables['time']
-        coords[BaseDataObject.TIME] = ncf.num2date(times[:], times.units)
-
-        for i, key in enumerate(data.dimensions):
-            if key in coords.keys():
-                coords[key] = (i, coords[key])
-
-        if h5file is not None:
-            return Hdf5DataObject(data[:], h5file, dim_coords=coords,
-                                  force_flat=force_flat, time_units=times.units)
-
-        else:
-            return BaseDataObject(data[:], dim_coords=coords,
-                                  force_flat=force_flat, time_units=times.units)
-
-    finally:
-        f.close()
-
-
-def posterior_ncf_to_data_obj(filename, var_name, h5file=None):
-
-    f = ncf.Dataset(filename, 'r')
-
-    try:
-        data = f.variables[var_name][:]
-        coords = {BaseDataObject.LAT: f.variables['lat'][:],
-                  BaseDataObject.LON: f.variables['lon'][:]}
-        times = (0, f.variables['time'][:])
-
-        coords['time'] = times
-        coords['lat'] = (1, coords['lat'])
-        coords['lon'] = (1, coords['lon'])
-
-        if h5file is not None:
-            return Hdf5DataObject(data, h5file, dim_coords=coords,
-                                  force_flat=True)
-
-        else:
-            return BaseDataObject(data, dim_coords=coords, force_flat=True)
-
-    finally:
-        f.close()
-
-
-def posterior_npz_to_data_obj(filename):
-    f = np.load(filename)
-
-    data = f['values'][:]
-    lat = f['lat'][:, 0]
-    lon = f['lon'][0, :]
-    coords = {BaseDataObject.LAT: (1, lat),
-              BaseDataObject.LON: (1, lon),
-              BaseDataObject.TIME: (0, f['years'])}
-
-    return BaseDataObject(data, dim_coords=coords, force_flat=True)
-
-
 def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
     """
     Transfer netCDF variable and latitude/longitude/time dimensions to an
@@ -1367,36 +1324,4 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
     finally:
         f.close()
         outf.close()
-
-
-def hdf5_to_data_obj(filename, var_name, h5file=None, data_dir='/'):
-
-    f = tb.open_file(filename, 'r')
-
-    try:
-        data = f.get_node(data_dir, name=var_name)[:]
-        if data.attrs.masked:
-            mask = data == data.attrs.fill_value
-            data = np.ma.array(data,
-                               mask=mask,
-                               fill_value=data.attrs.fill_value)
-
-        lat = f.get_node(data_dir+'lat')
-        lon = f.get_node(data_dir+'lon')
-        coords = {BaseDataObject.LAT: (lat.attrs.index, lat[:]),
-                  BaseDataObject.LON: (lon.attrs.index, lon[:])}
-        times = f.get_node(data_dir+'time')
-        coords[BaseDataObject.TIME] = (times.attrs.index,
-                                       ncf.num2date(times[:],
-                                                    times.attrs.units))
-
-        if h5file is not None:
-            return Hdf5DataObject(data, h5file, dim_coords=coords,
-                                  force_flat=True)
-
-        else:
-            return BaseDataObject(data, dim_coords=coords, force_flat=True)
-
-    finally:
-        f.close()
 
