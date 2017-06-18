@@ -59,21 +59,16 @@ def dask_detrend_data(data, output_arr):
     This is a very expensive operation if using a large dataset.  May slow down
     if forced to spill onto the disk cache
     """
-    dummy_time = np.arange(data.shape[0])
 
-    x = dummy_time[:, None]
-    y = data
-    ymean = data.mean(axis=0)
-    xmean = dummy_time.mean()
+    dummy_time = np.arange(data.shape[0])[:, None]
+    dummy_time = da.from_array(dummy_time, chunks=dummy_time.shape)
 
-    xanom = x - xmean
-    yanom = y - ymean
-    covxy = da.sum(xanom * yanom, axis=0)
-    xvar = x.var(axis=0, ddof=1)
-    beta = covxy/xvar
-    intercept = ymean - xmean*beta
+    rechunk_shp = (data.shape[0], 1)
+    tmp_data = da.rechunk(data, chunks=rechunk_shp)
 
-    predict = beta*x + intercept
+    coefs, resid, rank, s = da.linalg.lstsq(dummy_time, tmp_data)
+
+    predict = da.dot(dummy_time, coefs)
     detrended = data - predict
 
     da.store(detrended, output_arr)
