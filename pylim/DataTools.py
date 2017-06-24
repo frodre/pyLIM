@@ -53,14 +53,14 @@ class BaseDataObject(object):
     EQUIVLAT = 'equiv_lat'
 
     # Static databin keys
-    _COMPRESSED = 'compressed'
+    _COMPRESSED = 'compressed_data'
     _ORIGDATA = 'orig'
     _DETRENDED = 'detrended'
     _AWGHT = 'area_weighted'
-    _RUNMEAN = 'run_mean'
+    _RUNMEAN = 'running_mean'
     _ANOMALY = 'anomaly'
     _CLIMO = 'climo'
-    _EOFPROJ = 'eofproj'
+    _EOFPROJ = 'eof_proj'
 
     @staticmethod
     def _match_dims(shape, dim_coords):
@@ -135,6 +135,7 @@ class BaseDataObject(object):
         self._eofs = None
         self._svals = None
         self._eof_stats = {}
+        self._tb_file_args = None
 
         # Future possible data manipulation functionality
         self.anomaly = None
@@ -1146,6 +1147,29 @@ class Hdf5DataObject(BaseDataObject):
             self._default_grp = self.h5f.create_group(grp_path[0], grp_path[1],
                                                       createparents=True)
 
+    def save_dataobj_pckl(self, filename):
+        self._tb_file_args = {'h5fname': self.h5f.filename,
+                              'h5ffilt': self.h5f.filters,
+                              'grp': self._default_grp._v_pathname}
+
+        # temporary storage of hdf 5 file
+        tmp_bins = {}
+        h5f = self.h5f
+        self.h5f = None
+
+        # Set all HDF5 file connections to None
+        for key in self._data_bins.keys():
+            setattr(self, key, None)
+            tmp_bins[key] = self._data_bins[key]
+            self._data_bins[key] = None
+
+        super(Hdf5DataObject, self).save_dataobj_pckl(filename)
+
+        self.h5f = h5f
+        for key, dbin in tmp_bins.iteritems():
+            setattr(self, key, dbin)
+            self._data_bins[key] = dbin
+
     @classmethod
     def from_netcdf(cls, filename, var_name, h5file, **kwargs):
 
@@ -1159,6 +1183,28 @@ class Hdf5DataObject(BaseDataObject):
                                                     h5file=h5file,
                                                     data_dir=data_dir,
                                                     **kwargs)
+
+    @classmethod
+    def from_pickle(cls, filename):
+
+        obj = super(Hdf5DataObject, cls).from_pickle(filename)
+
+        tb_file_args = obj._tb_file_args
+        h5fname = tb_file_args['h5fname']
+        filters = tb_file_args['h5ffilt']
+        group_path = tb_file_args['grp']
+
+        h5f = tb.open_file(h5fname, mode='a', filters=filters)
+
+        for key in obj._data_bins.keys():
+            node = h5f.get_node(group_path, key)
+            obj._data_bins[key] = node
+            setattr(obj, key, node)
+
+        obj.h5f = h5f
+        obj._tb_file_args = None
+
+        return obj
 
 
 def var_to_hdf5_carray(h5file, group, node, data, **kwargs):
