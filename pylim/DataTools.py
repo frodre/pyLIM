@@ -776,8 +776,12 @@ class BaseDataObject(object):
 
         tmp_dimcoord = self._dim_coords[self.TIME]
         tmp_time = tmp_dimcoord[1]
+
+        kwargs = {}
+        if self.time_cal is not None:
+            kwargs['calendar'] = self.time_cal
         topckl_time = ncf.date2num(tmp_time, units=self.time_units,
-                                   calendar=self.time_cal)
+                                   **kwargs)
         self._dim_coords[self.TIME] = (tmp_dimcoord[0], topckl_time)
 
         with open(filename, 'w') as f:
@@ -865,9 +869,15 @@ class BaseDataObject(object):
             coords[BaseDataObject.TIME] = (times.attrs.index,
                                            ncf.num2date(times[:],
                                                         times.attrs.units))
+            time_units = times.attrs.units
+            if hasattr(times.attrs, 'calendar'):
+                time_cal = times.attrs.calendar
+            else:
+                time_cal = None
             force_flat = kwargs.pop('force_flat', True)
             return cls(data, dim_coords=coords, force_flat=force_flat,
-                       coord_grids=grids, fill_value=fill_val, **kwargs)
+                       coord_grids=grids, fill_value=fill_val,
+                       time_units=time_units, time_cal=time_cal, **kwargs)
 
     @classmethod
     def from_pickle(cls, filename):
@@ -879,8 +889,12 @@ class BaseDataObject(object):
 
         tmp_dimcoord = dobj._dim_coords[dobj.TIME]
         tmp_time = tmp_dimcoord[1]
+
+        kwargs = {}
+        if dobj.time_cal is not None:
+            kwargs['calendar'] = dobj.time_cal
         topckl_time = ncf.num2date(tmp_time, units=dobj.time_units,
-                                   calendar=dobj.time_cal)
+                                   **kwargs)
         dobj._dim_coords[dobj.TIME] = (tmp_dimcoord[0], topckl_time)
 
         return dobj
@@ -919,7 +933,8 @@ class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
                  force_flat=False, fill_value=None, chunk_shape=None,
-                 default_grp='/data', rotated_pole=False, coord_grids=None):
+                 default_grp='/data', rotated_pole=False, coord_grids=None,
+                 time_units=None, time_cal=None):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -986,7 +1001,9 @@ class Hdf5DataObject(BaseDataObject):
                                              force_flat=force_flat,
                                              fill_value=fill_value,
                                              rotated_pole=rotated_pole,
-                                             coord_grids=coord_grids)
+                                             coord_grids=coord_grids,
+                                             time_cal=time_cal,
+                                             time_units=time_units)
 
         self._eof_stats = None
 
@@ -1156,6 +1173,7 @@ class Hdf5DataObject(BaseDataObject):
         tmp_bins = {}
         h5f = self.h5f
         self.h5f = None
+        self._default_grp = None
 
         # Set all HDF5 file connections to None
         for key in self._data_bins.keys():
@@ -1163,12 +1181,17 @@ class Hdf5DataObject(BaseDataObject):
             tmp_bins[key] = self._data_bins[key]
             self._data_bins[key] = None
 
+        self.data = None
+
         super(Hdf5DataObject, self).save_dataobj_pckl(filename)
 
         self.h5f = h5f
+        self.set_databin_grp(self._tb_file_args['grp'])
         for key, dbin in tmp_bins.iteritems():
             setattr(self, key, dbin)
             self._data_bins[key] = dbin
+
+        self.reset_data(self._curr_data_key)
 
     @classmethod
     def from_netcdf(cls, filename, var_name, h5file, **kwargs):
@@ -1202,7 +1225,9 @@ class Hdf5DataObject(BaseDataObject):
             setattr(obj, key, node)
 
         obj.h5f = h5f
+        obj.set_databin_grp(group_path)
         obj._tb_file_args = None
+        obj.reset_data(obj._curr_data_key)
 
         return obj
 
