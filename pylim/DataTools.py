@@ -921,7 +921,7 @@ class BaseDataObject(object):
             return cls(data, dim_coords=coords, **kwargs)
 
     @classmethod
-    def from_posterior_npc(cls, filename, **kwargs):
+    def from_posterior_npz(cls, filename, **kwargs):
         with np.load(filename) as f:
             data = f['values'][:]
             lat = f['lat'][:, 0]
