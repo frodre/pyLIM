@@ -129,7 +129,7 @@ class BaseDataObject(object):
         self._save_none = save_none
         self._data_bins = {}
         self._curr_data_key = None
-        self._ops_performed = []
+        self._ops_performed = {}
         self._start_time_edge = None
         self._end_time_edge = None
         self._eofs = None
@@ -270,6 +270,12 @@ class BaseDataObject(object):
             self._set_curr_data_key(self._COMPRESSED)
 
     def _set_curr_data_key(self, key):
+        if self._curr_data_key is None:
+            self._ops_performed[key] = [key]
+        else:
+            self._ops_performed[key] = self._ops_performed[self._curr_data_key]
+            self._ops_performed[key] += [key]  # not sure if always a copy
+
         logger.debug('Setting current data key to: '.format(key))
         self._curr_data_key = key
 
