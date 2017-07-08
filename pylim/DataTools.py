@@ -15,6 +15,7 @@ import chest
 import cPickle as cpk
 import logging
 
+from datetime import datetime, timedelta
 from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
                   dask_detrend_data, calc_eofs
 
@@ -871,15 +872,29 @@ class BaseDataObject(object):
 
             coords = {BaseDataObject.LAT: (lat_idx, lat[:]),
                       BaseDataObject.LON: (lon_idx, lon[:])}
-            times = f.get_node(data_dir+'time')
-            coords[BaseDataObject.TIME] = (times.attrs.index,
-                                           ncf.num2date(times[:],
-                                                        times.attrs.units))
-            time_units = times.attrs.units
+
+            times = f.get_node(data_dir + 'time')
+            time_idx = times.attrs.index
             if hasattr(times.attrs, 'calendar'):
                 time_cal = times.attrs.calendar
             else:
                 time_cal = None
+
+            try:
+                time_units = times.attrs.units
+                times_list = ncf.num2date(times[:], time_units)
+                coords[BaseDataObject.TIME] = (times.attrs.index,
+                                               ncf.num2date(times[:],
+                                                            times.attrs.units))
+            except ValueError as e:
+                logger.error('Problem converting netCDF time units: ' + e)
+                [times_list,
+                 time_units] = _handle_year_zero_units(times[:],
+                                                       times.attrs.units,
+                                                       calendar=time_cal)
+
+            coords[BaseDataObject.TIME] = (time_idx, times_list)
+
             force_flat = kwargs.pop('force_flat', True)
             return cls(data, dim_coords=coords, force_flat=force_flat,
                        coord_grids=grids, fill_value=fill_val,
@@ -1401,4 +1416,30 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
     finally:
         f.close()
         outf.close()
+
+
+def _handle_year_zero_units(time_as_num, tunits, calendar=None):
+    # num2date needs calendar year start >= 0001 C.E. (bug submitted
+    # to unidata about this
+    fmt = '%Y-%d-%m %H:%M:%S'
+    since_yr_idx = tunits.index('since ') + 6
+    year = int(tunits[since_yr_idx:since_yr_idx+4])
+    year_diff = year - 0001
+    new_start_date = datetime(0001, 01, 01, 0, 0, 0)
+
+    new_units = tunits[:since_yr_idx] + '0001-01-01 00:00:00'
+    logger.debug('Converting numeric times using new units: ' + new_units)
+    if calendar is not None:
+        time_yrs = ncf.num2date(time_as_num,
+                                new_units,
+                                calendar=calendar)
+    else:
+        time_yrs = ncf.num2date(time_as_num, new_units)
+
+    time_yrs_list = [datetime(d.year + year_diff, d.month, d.day,
+                              d.hour, d.minute, d.second)
+                     for d in time_yrs]
+
+    return time_yrs_list, new_units
+
 
