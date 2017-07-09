@@ -131,6 +131,7 @@ class BaseDataObject(object):
         self._data_bins = {}
         self._curr_data_key = None
         self._ops_performed = {}
+        self._altered_time_coords = {}
         self._start_time_edge = None
         self._end_time_edge = None
         self._eofs = None
@@ -150,7 +151,8 @@ class BaseDataObject(object):
         # Match dimension coordinate vectors
         if dim_coords is not None:
             if self.TIME in dim_coords.keys():
-                if dim_coords[self.TIME][0] != 0:
+                time_idx, time_coord = dim_coords[self.TIME]
+                if time_idx != 0:
                     logger.error('Non-leading time dimension encountered in '
                                  'dim_coords.')
                     raise ValueError('Sampling dimension must always be the '
@@ -159,12 +161,14 @@ class BaseDataObject(object):
                 self._leading_time = True
                 self._time_shp = [data.shape[0]]
                 self._spatial_shp = data.shape[1:]
+                self._altered_time_coords[self._ORIGDATA] = time_coord
             else:
                 self._leading_time = False
                 self._time_shp = []
                 self._spatial_shp = self._full_shp
             self._dim_idx = self._match_dims(data.shape, dim_coords)
             self._dim_coords = dim_coords
+
         else:
             self._leading_time = False
             self._time_shp = []
@@ -380,6 +384,30 @@ class BaseDataObject(object):
         else:
             self.data = self.data.reshape(self._flat_spatial_shp)
 
+    def _set_time_coord(self, key, time_len_of_data):
+        """
+        Sets the time coordinate according to the provided data key.  Also
+        adjusts the object attribute of the time shape.
+        """
+
+        if key in self._altered_time_coords:
+            time_coord = self._altered_time_coords[key]
+        else:
+            time_coord = self._altered_time_coords[self._ORIGDATA]
+
+        if not len(time_coord) == time_len_of_data:
+            logger.error('Time coordinate length is different than the '
+                         'sampling dimension of the data. coord_len = {:d}, '
+                         'data_sample_len = {:d}'.format(len(time_coord),
+                                                         time_len_of_data))
+            raise ValueError('Inconsistent sampling dimension and '
+                             'corresponding coordinate length detected.')
+
+        time_idx = self._dim_coords[self.TIME][0]
+        self._dim_coords[self.TIME] = (time_idx, time_coord)
+
+        self._time_shp = [time_len_of_data]
+
     @staticmethod
     def _detrend_func(data, output_arr=None):
         return detrend_data(data, output_arr=output_arr)
@@ -491,10 +519,14 @@ class BaseDataObject(object):
         edge_pad = window_size // 2
         edge_trim = np.ceil(edge_pad / float(year_len)) * year_len
 
-        new_time = self.data.shape[0] - edge_trim * 2
+        new_time_len = self.data.shape[0] - edge_trim * 2
+        time_idx, old_time_coord = self._dim_coords[self.TIME]
+        new_time_coord = old_time_coord[edge_trim:-edge_trim]
+        self._dim_coords[self.TIME] = new_time_coord
+
         if save and not self._save_none:
             new_shape = list(self.data.shape)
-            new_shape[0] = new_time
+            new_shape[0] = new_time_len
             new_shape = tuple(new_shape)
             self.running_mean = self._new_empty_databin(new_shape,
                                                         self.data.dtype,
@@ -502,10 +534,11 @@ class BaseDataObject(object):
 
         self.data = run_mean(self.data, window_size, trim_edge=edge_trim,
                              output_arr=self.running_mean)
-        self._time_shp = [new_time]
+        self._time_shp = [new_time_len]
         self._start_time_edge = edge_trim
         self._end_time_edge = -edge_trim
         self._set_curr_data_key(self._RUNMEAN)
+        self._altered_time_coords[self._RUNMEAN] = new_time_coord
 
         return self.data
 
@@ -764,8 +797,7 @@ class BaseDataObject(object):
         try:
             self.data = self._data_bins[key]
             if self._leading_time:
-                # running mean alters the time TODO: check that this works
-                self._time_shp = [self.data.shape[0]]
+                self._set_time_coord(key, self.data.shape[0])
             self._set_curr_data_key(key)
         except KeyError:
             logger.error('Could not find {} in initialized '
