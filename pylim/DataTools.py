@@ -887,7 +887,7 @@ class BaseDataObject(object):
                                                ncf.num2date(times[:],
                                                             times.attrs.units))
             except ValueError as e:
-                logger.error('Problem converting netCDF time units: ' + e)
+                logger.error('Problem converting netCDF time units: ' + str(e))
                 [times_list,
                  time_units] = _handle_year_zero_units(times[:],
                                                        times.attrs.units,
@@ -1436,7 +1436,7 @@ def _handle_year_zero_units(time_as_num, tunits, calendar=None):
     else:
         time_yrs = ncf.num2date(time_as_num, new_units)
 
-    time_yrs_list = [datetime(d.year + year_diff, d.month, d.day,
+    time_yrs_list = [datetime(d.year + year_diff, d.month, 1,
                               d.hour, d.minute, d.second)
                      for d in time_yrs]
 
