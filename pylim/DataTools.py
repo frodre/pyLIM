@@ -412,6 +412,55 @@ class BaseDataObject(object):
     def _detrend_func(data, output_arr=None):
         return detrend_data(data, output_arr=output_arr)
 
+    @staticmethod
+    def _avg_func(data, output_arr=None):
+        return np.mean(data, axis=1, out=output_arr)
+
+    def time_average_resample(self, key, nsamples_in_avg, shift=0):
+        """
+        Resample by averaging over the sampling dimension.
+        :return:
+        """
+        if not self._leading_time:
+            raise ValueError('Can only perform a resample operation when data '
+                             'has a leading sampling dimension.')
+
+        if shift < 0:
+            logger.error('Invalid shift argument (shift = {:d})'.format(shift))
+            raise ValueError('Currently only positive shifts are supported '
+                             'for resampling.')
+
+        nsamples = self._time_shp[0]
+        nsamples -= shift
+        new_nsamples = nsamples // nsamples_in_avg
+        end_cutoff = nsamples % nsamples_in_avg
+        spatial_shp = self.data.shape[1:]
+        new_shape = [new_nsamples] + list(spatial_shp)
+        avg_shape = [new_nsamples, nsamples_in_avg] + list(spatial_shp)
+
+        new_bin = self._new_empty_databin(new_shape, self.data.dtype, key)
+        setattr(self, key, new_bin)
+
+        self.data = self.data[shift:-end_cutoff]
+        self.data = self.data.reshape(avg_shape)
+
+        self.data = self._avg_func(self.data, output_arr=new_bin)
+
+        self._time_shp = [new_nsamples]
+        time_idx, time_coord = self._dim_coords[self.TIME]
+        new_time_coord = time_coord[shift::nsamples_in_avg]
+        self._dim_coords[self.TIME] = (time_idx, new_time_coord)
+        self._altered_time_coords[key] = new_time_coord
+
+        self._set_curr_data_key(key)
+
+        return self.data
+
+
+
+
+
+
     def inflate_full_grid(self, data=None, expand_axis=-1, reshape_orig=False):
         """
         Returns previously compressed data to its full grid filled with np.NaN
@@ -522,7 +571,7 @@ class BaseDataObject(object):
         new_time_len = self.data.shape[0] - edge_trim * 2
         time_idx, old_time_coord = self._dim_coords[self.TIME]
         new_time_coord = old_time_coord[edge_trim:-edge_trim]
-        self._dim_coords[self.TIME] = new_time_coord
+        self._dim_coords[self.TIME] = (time_idx, new_time_coord)
 
         if save and not self._save_none:
             new_shape = list(self.data.shape)
@@ -1159,10 +1208,16 @@ class Hdf5DataObject(BaseDataObject):
         da.store(compressed_data, out_arr)
         return out_arr
 
-    # TODO: Need to tie this to some more formal configuration
     @staticmethod
     def _detrend_func(data, output_arr=None, **kwargs):
         return dask_detrend_data(data, output_arr=output_arr)
+
+    @staticmethod
+    def _avg_func(data, output_arr=None):
+        tmp = da.mean(data, axis=1)
+        da.store(tmp, output_arr)
+
+        return output_arr
 
     def calc_running_mean(self, window_size, year_len, save=True):
 
