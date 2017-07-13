@@ -109,27 +109,33 @@ class LIM(object):
     ....
     """
 
-    def __init__(self, calib_data, nelem_in_tau1, h5file=None):
+    def __init__(self, tau0_data, tau1_data=None, nelem_in_tau1=1, h5file=None):
         """
         Parameters
         ----------
-        calib_data: ndarray
+        tau0_data: ndarray
             Data for calibrating the LIM.  Expects
             a 2D MxN matrix where M (rows) represent the sampling dimension and
             N(columns) represents the feature dimension (e.g. spatial grid
             points).
-        nelem_in_tau1: int
+        tau1_data: ndarray, optional
+            Data with lag of tau=1.  Used to calculate the mapping term, G1,
+            going from tau0 to tau1.  Must be the same shape as tau0_data.  If
+            not provided, tau0_data is assumed to be sequential and
+            nelem_in_tau1 and tau0_data is used to calculate lag covariance.
+        nelem_in_tau1: int, optional
             Number of time samples that span tau=1.  E.g. for monthly data when
             a forecast tau is equivalent to 1 year, nelem_in_tau should be 12.
+            Used if tau1_data is not provided.
         h5file: HDF5_Object, Optional
             File object to store LIM output.  It will create a series of
             directories under the given group
         """
         logger.info('Initializing LIM forecasting object...')
 
-        if calib_data.ndim != 2:
+        if tau0_data.ndim != 2:
             logger.error(('LIM calibration data is not 2D '
-                          '(Contained ndim={:d}').format(calib_data.ndim))
+                          '(Contained ndim={:d}').format(tau0_data.ndim))
             raise ValueError('Input LIM calibration data is not 2D')
 
         self._h5file = h5file
@@ -137,8 +143,19 @@ class LIM(object):
         self._nelem_in_tau1 = nelem_in_tau1
         self._eof_var_stats = {}
 
-        x0 = calib_data[0:-nelem_in_tau1, :]
-        x1 = calib_data[nelem_in_tau1:, :]
+        if tau1_data is not None:
+            if not tau1_data.shape == tau0_data.shape:
+                logger.error('LIM calibration data shape mismatch. tau1: {}'
+                             ' tau0: {}'.format(tau1_data.shape,
+                                                tau0_data.shape))
+                raise ValueError('Tau1 and Tau0 calibration data shape '
+                                 'mismatch')
+
+            x0 = tau0_data
+            x1 = tau1_data
+        else:
+            x0 = tau0_data[0:-nelem_in_tau1, :]
+            x1 = tau0_data[nelem_in_tau1:, :]
 
         self.G_1 = _calc_m(x0, x1, tau=1)
 
@@ -246,20 +263,27 @@ class ParamReducedLIM(LIM):
     ....
     """
 
-    def __init__(self, calib_data, nelem_in_tau1, num_eofs, h5file=None):
+    def __init__(self, tau0_data, num_eofs, tau1_data=None, nelem_in_tau1=1,
+                 h5file=None):
         """
         Parameters
         ----------
-        calib_data: ndarray
+        tau0_data: ndarray
             Data for calibrating the LIM.  Expects
             a 2D MxN matrix where M (rows) represent the sampling dimension and
             N(columns) represents the feature dimension (e.g. spatial grid
             points).
         num_eofs: int
             Number of principal components to include in forecast calculations
-        nelem_in_tau1: int
+        tau1_data: ndarray, optional
+            Data with lag of tau=1.  Used to calculate the mapping term, G1,
+            going from tau0 to tau1.  Must be the same shape as tau0_data.  If
+            not provided, tau0_data is assumed to be sequential and
+            nelem_in_tau1 and tau0_data is used to calculate lag covariance.
+        nelem_in_tau1: int, optional
             Number of time samples that span tau=1.  E.g. for monthly data when
             a forecast tau is equivalent to 1 year, nelem_in_tau should be 12.
+            Used if tau1_data is not provided.
         h5file: HDF5_Object, Optional
             File object to store LIM output.  It will create a series of
             directories under the given group
@@ -269,9 +293,15 @@ class ParamReducedLIM(LIM):
 
         logger.info('Calculating EOFs on calibration data.')
         stime = time.time()
-        self._eofs = calc_eofs(calib_data, num_eofs,
+        self._eofs = calc_eofs(tau0_data, num_eofs,
                                var_stats_dict=self._eof_var_stats)
-        eof_calib_data = np.dot(self._eofs.T, calib_data.T)
+        eof_tau0_data = np.dot(self._eofs.T, tau0_data.T)
+
+        if tau1_data is not None:
+            eof_tau1_data = np.dot(self._eofs.T, tau1_data.T)
+        else:
+            eof_tau1_data = None
+
         etime = time.time() - stime
         logger.info('EOF truncation finished in {:2.2f}s'.format(etime))
 
@@ -282,7 +312,9 @@ class ParamReducedLIM(LIM):
                           ).format(self._eof_var_stats['total_var'],
                                    self._eof_var_stats['var_expl_by_ret']))
 
-        super(ParamReducedLIM, self).__init__(eof_calib_data, nelem_in_tau1,
+        super(ParamReducedLIM, self).__init__(eof_tau0_data,
+                                              tau1_data=eof_tau1_data,
+                                              nelem_in_tau1=nelem_in_tau1,
                                               h5file=h5file)
 
         if h5file is not None:

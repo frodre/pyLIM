@@ -131,6 +131,7 @@ class BaseDataObject(object):
         self._data_bins = {}
         self._curr_data_key = None
         self._ops_performed = {}
+        self._altered_time_coords = {}
         self._start_time_edge = None
         self._end_time_edge = None
         self._eofs = None
@@ -150,7 +151,8 @@ class BaseDataObject(object):
         # Match dimension coordinate vectors
         if dim_coords is not None:
             if self.TIME in dim_coords.keys():
-                if dim_coords[self.TIME][0] != 0:
+                time_idx, time_coord = dim_coords[self.TIME]
+                if time_idx != 0:
                     logger.error('Non-leading time dimension encountered in '
                                  'dim_coords.')
                     raise ValueError('Sampling dimension must always be the '
@@ -159,12 +161,14 @@ class BaseDataObject(object):
                 self._leading_time = True
                 self._time_shp = [data.shape[0]]
                 self._spatial_shp = data.shape[1:]
+                self._altered_time_coords[self._ORIGDATA] = time_coord
             else:
                 self._leading_time = False
                 self._time_shp = []
                 self._spatial_shp = self._full_shp
             self._dim_idx = self._match_dims(data.shape, dim_coords)
             self._dim_coords = dim_coords
+
         else:
             self._leading_time = False
             self._time_shp = []
@@ -381,9 +385,78 @@ class BaseDataObject(object):
         else:
             self.data = self.data.reshape(self._flat_spatial_shp)
 
+    def _set_time_coord(self, key, time_len_of_data):
+        """
+        Sets the time coordinate according to the provided data key.  Also
+        adjusts the object attribute of the time shape.
+        """
+
+        if key in self._altered_time_coords:
+            time_coord = self._altered_time_coords[key]
+        else:
+            time_coord = self._altered_time_coords[self._ORIGDATA]
+
+        if not len(time_coord) == time_len_of_data:
+            logger.error('Time coordinate length is different than the '
+                         'sampling dimension of the data. coord_len = {:d}, '
+                         'data_sample_len = {:d}'.format(len(time_coord),
+                                                         time_len_of_data))
+            raise ValueError('Inconsistent sampling dimension and '
+                             'corresponding coordinate length detected.')
+
+        time_idx = self._dim_coords[self.TIME][0]
+        self._dim_coords[self.TIME] = (time_idx, time_coord)
+
+        self._time_shp = [time_len_of_data]
+
     @staticmethod
     def _detrend_func(data, output_arr=None):
         return detrend_data(data, output_arr=output_arr)
+
+    @staticmethod
+    def _avg_func(data, output_arr=None):
+        return np.mean(data, axis=1, out=output_arr)
+
+    def time_average_resample(self, key, nsamples_in_avg, shift=0):
+        """
+        Resample by averaging over the sampling dimension.
+        :return:
+        """
+        if not self._leading_time:
+            raise ValueError('Can only perform a resample operation when data '
+                             'has a leading sampling dimension.')
+
+        if shift < 0:
+            logger.error('Invalid shift argument (shift = {:d})'.format(shift))
+            raise ValueError('Currently only positive shifts are supported '
+                             'for resampling.')
+
+        nsamples = self._time_shp[0]
+        nsamples -= shift
+        new_nsamples = nsamples // nsamples_in_avg
+        end_cutoff = nsamples % nsamples_in_avg
+        spatial_shp = self.data.shape[1:]
+        new_shape = [new_nsamples] + list(spatial_shp)
+        avg_shape = [new_nsamples, nsamples_in_avg] + list(spatial_shp)
+
+        new_bin = self._new_empty_databin(new_shape, self.data.dtype, key)
+        setattr(self, key, new_bin)
+
+        self.data = self.data[shift:-end_cutoff]
+        self.data = self.data.reshape(avg_shape)
+
+        self.data = self._avg_func(self.data, output_arr=new_bin)
+
+        self._time_shp = [new_nsamples]
+        time_idx, time_coord = self._dim_coords[self.TIME]
+        new_time_coord = time_coord[shift::nsamples_in_avg]
+        self._dim_coords[self.TIME] = (time_idx, new_time_coord)
+        self._altered_time_coords[key] = new_time_coord
+
+        self._set_curr_data_key(key)
+
+        return self.data
+
 
     def train_test_split_random(self, test_size=0.25, random_seed=None,
                                 sample_lags=None):
@@ -436,6 +509,8 @@ class BaseDataObject(object):
             training_data.append(train_dobj)
 
         return test_data, training_data
+
+
 
     def inflate_full_grid(self, data=None, expand_axis=-1, reshape_orig=False):
         """
@@ -544,10 +619,14 @@ class BaseDataObject(object):
         edge_pad = window_size // 2
         edge_trim = np.ceil(edge_pad / float(year_len)) * year_len
 
-        new_time = self.data.shape[0] - edge_trim * 2
+        new_time_len = self.data.shape[0] - edge_trim * 2
+        time_idx, old_time_coord = self._dim_coords[self.TIME]
+        new_time_coord = old_time_coord[edge_trim:-edge_trim]
+        self._dim_coords[self.TIME] = (time_idx, new_time_coord)
+
         if save and not self._save_none:
             new_shape = list(self.data.shape)
-            new_shape[0] = new_time
+            new_shape[0] = new_time_len
             new_shape = tuple(new_shape)
             self.running_mean = self._new_empty_databin(new_shape,
                                                         self.data.dtype,
@@ -555,10 +634,11 @@ class BaseDataObject(object):
 
         self.data = run_mean(self.data, window_size, trim_edge=edge_trim,
                              output_arr=self.running_mean)
-        self._time_shp = [new_time]
+        self._time_shp = [new_time_len]
         self._start_time_edge = edge_trim
         self._end_time_edge = -edge_trim
         self._set_curr_data_key(self._RUNMEAN)
+        self._altered_time_coords[self._RUNMEAN] = new_time_coord
 
         return self.data
 
@@ -817,8 +897,7 @@ class BaseDataObject(object):
         try:
             self.data = self._data_bins[key]
             if self._leading_time:
-                # running mean alters the time TODO: check that this works
-                self._time_shp = [self.data.shape[0]]
+                self._set_time_coord(key, self.data.shape[0])
             self._set_curr_data_key(key)
         except KeyError:
             logger.error('Could not find {} in initialized '
@@ -854,16 +933,16 @@ class BaseDataObject(object):
         Copies the current data object to a new object only retaining the
         current data_bin and associated information.  Allows for subsampling
         of the current data.
-        
+
         Parameters
         ----------
         data_indices: list of ints  or slice object, optional
             Indicies to subsample the current data object data for the copy
             operation.
-            
+
         kwargs:
             Other keyword arguments for _helper_copy_new_databin method
-            
+
         Returns
         -------
         DataObject
@@ -1266,10 +1345,16 @@ class Hdf5DataObject(BaseDataObject):
         da.store(compressed_data, out_arr)
         return out_arr
 
-    # TODO: Need to tie this to some more formal configuration
     @staticmethod
     def _detrend_func(data, output_arr=None, **kwargs):
         return dask_detrend_data(data, output_arr=output_arr)
+
+    @staticmethod
+    def _avg_func(data, output_arr=None):
+        tmp = da.mean(data, axis=1)
+        da.store(tmp, output_arr)
+
+        return output_arr
 
     def calc_running_mean(self, window_size, year_len, save=True):
 
@@ -1358,7 +1443,7 @@ class Hdf5DataObject(BaseDataObject):
         Copies the current data object to a new object only retaining the
         current data_bin and associated information.  Allows for subsampling
         of the current data.
-        
+
         Parameters
         ----------
         data_indices: list of ints  or slice object, optional
@@ -1367,7 +1452,7 @@ class Hdf5DataObject(BaseDataObject):
         data_group: str or tables.Group, optional
             What group to store the data_bins under in the HDF5 file. Defaults
             to /data_copy.
-            
+
         Returns
         -------
         DataObject
