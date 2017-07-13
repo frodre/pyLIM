@@ -16,6 +16,7 @@ import cPickle as cpk
 import logging
 
 from datetime import datetime, timedelta
+from copy import copy, deepcopy
 from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
                   dask_detrend_data, calc_eofs
 
@@ -120,7 +121,6 @@ class BaseDataObject(object):
 
         assert data.ndim <= 4, 'Maximum of 4 dimensions are allowed.'
         self._full_shp = data.shape
-        self.data_dtype = data.dtype
         self.forced_flat = force_flat
         self.time_units = time_units
         self.time_cal = time_cal
@@ -270,15 +270,16 @@ class BaseDataObject(object):
                                                      out_arr=self.compressed_data)
             self._set_curr_data_key(self._COMPRESSED)
 
-    def _set_curr_data_key(self, key):
-        if self._curr_data_key is None:
-            self._ops_performed[key] = [key]
+    def _set_curr_data_key(self, new_key):
+        curr_key = self._curr_data_key
+        if curr_key is None:
+            self._ops_performed[new_key] = [new_key]
         else:
-            self._ops_performed[key] = self._ops_performed[self._curr_data_key]
-            self._ops_performed[key] += [key]  # not sure if always a copy
+            self._ops_performed[new_key] = list(self._ops_performed[curr_key])
+            self._ops_performed[new_key] += [new_key]  # not sure if always a copy
 
-        logger.debug('Setting current data key to: '.format(key))
-        self._curr_data_key = key
+        logger.debug('Setting current data key to: '.format(new_key))
+        self._curr_data_key = new_key
 
     def _new_empty_databin(self, shape, dtype, name):
         """
@@ -383,6 +384,58 @@ class BaseDataObject(object):
     @staticmethod
     def _detrend_func(data, output_arr=None):
         return detrend_data(data, output_arr=output_arr)
+
+    def train_test_split_random(self, test_size=0.25, random_seed=None,
+                                sample_lags=None):
+
+        if random_seed is not None:
+            np.random.seed(random_seed)
+
+        sample_len = self._time_shp[0]
+
+        if sample_lags is not None:
+            sample_len -= max(sample_lags)
+
+        if isinstance(test_size, float):
+            if test_size >= 1:
+                raise ValueError('Testing sample size must be between 0.0 and '
+                                 '1.0 if float is provided.')
+
+            test_samples = int(np.ciel(sample_len * test_size))
+        elif isinstance(test_size, int):
+            test_samples = test_size
+        else:
+            raise ValueError('Testing sample size must be of type int or '
+                             'float.')
+
+        if test_samples <= 0:
+            logging.error('Invalid testing sample size encountered: '
+                          'test_samples={:d}'.format(test_samples))
+            raise ValueError('Provided testing sample size is too small.')
+
+        test_indices = np.random.choice(sample_len, size=test_samples,
+                                         replace=False)
+        train_indices = set(np.arange(sample_len)) - set(test_indices)
+        train_indices = np.array(list(train_indices))
+
+        if sample_lags is None:
+            sample_lags = []
+
+        test_data = []
+        training_data = []
+
+        # Add in t0 to the lags
+        sample_lags = [0] + list(sample_lags)
+
+        for idx_adjust in [0]+list(sample_lags):
+            test_data.append(self.data[test_indices+idx_adjust])
+
+            # Create subsampled data object copy
+            train_dobj = self.copy(data_indices=train_indices+idx_adjust,
+                                   data_group='copy_lag{:d}'.format(idx_adjust))
+            training_data.append(train_dobj)
+
+        return test_data, training_data
 
     def inflate_full_grid(self, data=None, expand_axis=-1, reshape_orig=False):
         """
@@ -796,6 +849,91 @@ class BaseDataObject(object):
 
         self._dim_coords[self.TIME] = (tmp_dimcoord[0], tmp_time)
 
+    def copy(self, data_indices=None, **kwargs):
+        """
+        Copies the current data object to a new object only retaining the
+        current data_bin and associated information.  Allows for subsampling
+        of the current data.
+        
+        Parameters
+        ----------
+        data_indices: list of ints  or slice object, optional
+            Indicies to subsample the current data object data for the copy
+            operation.
+            
+        kwargs:
+            Other keyword arguments for _helper_copy_new_databin method
+            
+        Returns
+        -------
+        DataObject
+            Copy of the current data object with or without a subsample
+        """
+        if data_indices is not None and not self.is_leading_time():
+            raise ValueError('Cannot copy with specified indices for subsample'
+                             'when data does not contain leading sampling dim.')
+
+        cls = self.__class__
+        new_obj = cls.__new__(cls)
+        curr_dict = copy(self.__dict__)
+
+        # attributes that need deep copy (arrays, lists, etc.)
+        attrs_to_deepcopy = ['_coord_grids', '_time_shp', '_spatial_shp',
+                             '_dim_idx', '_dim_coords', '_flat_spatial_shp',
+                             'valid_data']
+
+        # check if eof attributes are relevant
+        current_dkey = self._curr_data_key
+        if (current_dkey == self._EOFPROJ or
+            self._EOFPROJ in self._ops_performed[current_dkey]):
+            attrs_to_deepcopy.append('_eof_stats')
+        else:
+            curr_dict['_eofs'] = None
+            curr_dict['_svals'] = None
+            curr_dict['_eof_stats'] = {}
+
+        deepcopy_items = {key: curr_dict.pop(key) for key in attrs_to_deepcopy}
+
+        # Unset all databin attributes
+        for key in self._data_bins.keys():
+            if key != self._curr_data_key:
+                curr_dict[key] = None
+
+        curr_dict['data'] = None
+        curr_dict['_data_bins'] = {}
+        ops_performed = {current_dkey: curr_dict['_ops_performed']}
+        curr_dict['_ops_performed'] = ops_performed
+
+        deepcopied_attrs = deepcopy(deepcopy_items)
+
+        data = self.data
+
+        # Adjust the time and data if resampling
+        if data_indices is not None:
+            try:
+                sample_len = len(data_indices)
+            except TypeError as e:
+                # Assume slice input
+                sample_len = data_indices.stop - data_indices.start
+            time_idx, time_coord = deepcopied_attrs['_dim_coords'][self.TIME]
+            time_coord = time_coord[data_indices]
+            deepcopied_attrs['_dim_coords'][self.TIME] = (time_idx, time_coord)
+            deepcopied_attrs['_time_shp'] = [sample_len]
+            data = data[data_indices]
+
+        # Update object with attributes
+        new_obj.__dict__.update(curr_dict)
+        new_obj.__dict__.update(deepcopied_attrs)
+
+        # Create a new databin for our data
+        new_obj._helper_copy_new_databin(current_dkey, data, **kwargs)
+
+        return new_obj
+
+    def _helper_copy_new_databin(self, data_key, data, **kwargs):
+        self.data = self._new_databin(data, data_key)
+        self._set_curr_data_key(data_key)
+
     @classmethod
     def from_netcdf(cls, filename, var_name, **kwargs):
 
@@ -1028,7 +1166,7 @@ class Hdf5DataObject(BaseDataObject):
 
         self._eof_stats = None
 
-    def _set_curr_data_key(self, key):
+    def _set_curr_data_key(self, new_key):
         if not hasattr(self.data, 'dask'):
             chunk_shp = self._determine_chunk(self._leading_time,
                                               self.data.shape,
@@ -1036,7 +1174,7 @@ class Hdf5DataObject(BaseDataObject):
             self._chunk_shape = chunk_shp
             logger.debug('Current chunk shape: {}'.format(chunk_shp))
             self.data = da.from_array(self.data, chunks=self._chunk_shape)
-        super(Hdf5DataObject, self)._set_curr_data_key(key)
+        super(Hdf5DataObject, self)._set_curr_data_key(new_key)
 
     # Create backend data container
     def _new_empty_databin(self, shape, dtype, name):
@@ -1083,6 +1221,7 @@ class Hdf5DataObject(BaseDataObject):
             sptl_size = np.product(shape[1:]) * dtype.itemsize
             rows_in_chunk = size*1024**2 // sptl_size
             rows_in_chunk = int(rows_in_chunk)
+            rows_in_chunk = min((rows_in_chunk, shape[0]))
             chunk = tuple([rows_in_chunk] + list(shape[1:]))
         else:
             nelem = np.product(shape)
@@ -1213,6 +1352,36 @@ class Hdf5DataObject(BaseDataObject):
             self._data_bins[key] = dbin
 
         self.reset_data(self._curr_data_key)
+
+    def copy(self, data_indices=None, data_group='/data_copy'):
+        """
+        Copies the current data object to a new object only retaining the
+        current data_bin and associated information.  Allows for subsampling
+        of the current data.
+        
+        Parameters
+        ----------
+        data_indices: list of ints  or slice object, optional
+            Indicies to subsample the current data object data for the copy
+            operation.
+        data_group: str or tables.Group, optional
+            What group to store the data_bins under in the HDF5 file. Defaults
+            to /data_copy.
+            
+        Returns
+        -------
+        DataObject
+            Copy of the current data object with or without a subsample
+        """
+
+        new_obj = super(Hdf5DataObject, self).copy(data_indices=data_indices,
+                                                   data_group=data_group)
+        return new_obj
+
+    def _helper_copy_new_databin(self, data_key, data, data_group):
+        self.set_databin_grp(data_group)
+        self.data = self._new_databin(data, data_key)
+        self._set_curr_data_key(data_key)
 
     @classmethod
     def from_netcdf(cls, filename, var_name, h5file, **kwargs):
