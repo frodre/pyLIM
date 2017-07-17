@@ -394,7 +394,14 @@ class BaseDataObject(object):
         if key in self._altered_time_coords:
             time_coord = self._altered_time_coords[key]
         else:
-            time_coord = self._altered_time_coords[self._ORIGDATA]
+            ops = self._ops_performed[key]
+            for past_op_key in ops[::-1]:
+                if past_op_key in self._altered_time_coords:
+                    time_coord = self._altered_time_coords[past_op_key]
+                    break
+            else:
+                raise IndexError('No suitable time coordinates found for '
+                                 'current key.')
 
         if not len(time_coord) == time_len_of_data:
             logger.error('Time coordinate length is different than the '
@@ -457,7 +464,6 @@ class BaseDataObject(object):
 
         return self.data
 
-
     def train_test_split_random(self, test_size=0.25, random_seed=None,
                                 sample_lags=None):
 
@@ -473,8 +479,7 @@ class BaseDataObject(object):
             if test_size >= 1:
                 raise ValueError('Testing sample size must be between 0.0 and '
                                  '1.0 if float is provided.')
-
-            test_samples = int(np.ciel(sample_len * test_size))
+            test_samples = int(np.ceil(sample_len * test_size))
         elif isinstance(test_size, int):
             test_samples = test_size
         else:
@@ -487,7 +492,7 @@ class BaseDataObject(object):
             raise ValueError('Provided testing sample size is too small.')
 
         test_indices = np.random.choice(sample_len, size=test_samples,
-                                         replace=False)
+                                        replace=False)
         train_indices = set(np.arange(sample_len)) - set(test_indices)
         train_indices = np.array(list(train_indices))
 
@@ -496,12 +501,13 @@ class BaseDataObject(object):
 
         test_data = []
         training_data = []
+        obj_data = getattr(self, self._curr_data_key)
 
         # Add in t0 to the lags
         sample_lags = [0] + list(sample_lags)
 
-        for idx_adjust in [0]+list(sample_lags):
-            test_data.append(self.data[test_indices+idx_adjust])
+        for idx_adjust in sample_lags:
+            test_data.append(obj_data[test_indices+idx_adjust])
 
             # Create subsampled data object copy
             train_dobj = self.copy(data_indices=train_indices+idx_adjust,
@@ -509,8 +515,6 @@ class BaseDataObject(object):
             training_data.append(train_dobj)
 
         return test_data, training_data
-
-
 
     def inflate_full_grid(self, data=None, expand_axis=-1, reshape_orig=False):
         """
@@ -896,9 +900,9 @@ class BaseDataObject(object):
         logger.info('Resetting data to: {}'.format(key))
         try:
             self.data = self._data_bins[key]
+            self._set_curr_data_key(key)
             if self._leading_time:
                 self._set_time_coord(key, self.data.shape[0])
-            self._set_curr_data_key(key)
         except KeyError:
             logger.error('Could not find {} in initialized '
                          'databins.'.format(key))
@@ -986,6 +990,7 @@ class BaseDataObject(object):
         deepcopied_attrs = deepcopy(deepcopy_items)
 
         data = self.data
+        time_idx, time_coord = deepcopied_attrs['_dim_coords'][self.TIME]
 
         # Adjust the time and data if resampling
         if data_indices is not None:
@@ -994,11 +999,12 @@ class BaseDataObject(object):
             except TypeError as e:
                 # Assume slice input
                 sample_len = data_indices.stop - data_indices.start
-            time_idx, time_coord = deepcopied_attrs['_dim_coords'][self.TIME]
             time_coord = time_coord[data_indices]
             deepcopied_attrs['_dim_coords'][self.TIME] = (time_idx, time_coord)
             deepcopied_attrs['_time_shp'] = [sample_len]
             data = data[data_indices]
+
+        curr_dict['_altered_time_coords'] = {current_dkey: time_coord}
 
         # Update object with attributes
         new_obj.__dict__.update(curr_dict)
