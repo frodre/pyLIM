@@ -254,6 +254,7 @@ class BaseDataObject(object):
             logger.debug('Flattening data over spatial dimensions. New shp: '
                          '{}'.format(self.data.shape))
 
+        self._add_to_operation_history(None, self._ORIGDATA)
         self._set_curr_data_key(self._ORIGDATA)
 
         # Compress the data if mask is present
@@ -272,18 +273,19 @@ class BaseDataObject(object):
             self.data = self._compress_to_valid_data(self.data,
                                                      self.valid_data,
                                                      out_arr=self.compressed_data)
+            self._add_to_operation_history(self._curr_data_key, self._COMPRESSED)
             self._set_curr_data_key(self._COMPRESSED)
 
     def _set_curr_data_key(self, new_key):
-        curr_key = self._curr_data_key
-        if curr_key is None:
-            self._ops_performed[new_key] = [new_key]
-        else:
-            self._ops_performed[new_key] = list(self._ops_performed[curr_key])
-            self._ops_performed[new_key] += [new_key]  # not sure if always a copy
-
         logger.debug('Setting current data key to: '.format(new_key))
         self._curr_data_key = new_key
+
+    def _add_to_operation_history(self, curr_dkey, new_op_key):
+        if curr_dkey is None:
+            self._ops_performed[new_op_key] = [new_op_key]
+        else:
+            self._ops_performed[new_op_key] = list(self._ops_performed[curr_dkey])
+            self._ops_performed[new_op_key] += [new_op_key]
 
     def _new_empty_databin(self, shape, dtype, name):
         """
@@ -460,6 +462,7 @@ class BaseDataObject(object):
         self._dim_coords[self.TIME] = (time_idx, new_time_coord)
         self._altered_time_coords[key] = new_time_coord
 
+        self._add_to_operation_history(self._curr_data_key, key)
         self._set_curr_data_key(key)
 
         return self.data
@@ -507,11 +510,11 @@ class BaseDataObject(object):
         sample_lags = [0] + list(sample_lags)
 
         for idx_adjust in sample_lags:
-            test_data.append(obj_data[test_indices+idx_adjust])
+            test_data.append(obj_data[test_indices+idx_adjust, ...])
 
             # Create subsampled data object copy
             train_dobj = self.copy(data_indices=train_indices+idx_adjust,
-                                   data_group='copy_lag{:d}'.format(idx_adjust))
+                                   data_group='/copy_lag{:d}'.format(idx_adjust))
             training_data.append(train_dobj)
 
         return test_data, training_data
@@ -641,6 +644,7 @@ class BaseDataObject(object):
         self._time_shp = [new_time_len]
         self._start_time_edge = edge_trim
         self._end_time_edge = -edge_trim
+        self._add_to_operation_history(self._curr_data_key, self._RUNMEAN)
         self._set_curr_data_key(self._RUNMEAN)
         self._altered_time_coords[self._RUNMEAN] = new_time_coord
 
@@ -684,6 +688,7 @@ class BaseDataObject(object):
                                              climo=climo,
                                              output_arr=self.anomaly)
 
+        self._add_to_operation_history(self._curr_data_key, self._ANOMALY)
         self._set_curr_data_key(self._ANOMALY)
         return self.data
 
@@ -712,6 +717,7 @@ class BaseDataObject(object):
                                                      self._DETRENDED)
 
         self.data = self._detrend_func(self.data, output_arr=self.detrended)
+        self._add_to_operation_history(self._curr_data_key, self._DETRENDED)
         self._set_curr_data_key(self._DETRENDED)
         return self.data
 
@@ -760,9 +766,10 @@ class BaseDataObject(object):
             self.area_weighted[:] = ne.evaluate('awgt * scale')
 
         self.data = self.area_weighted
+        self._add_to_operation_history(self._curr_data_key, self._AWGHT)
         self._set_curr_data_key(self._AWGHT)
 
-    def eof_proj_data(self, num_eofs, save=True):
+    def eof_proj_data(self, num_eofs=10, eof_in=None, save=True):
         """
         Calculate spatial EOFs on the data retaining a specified number of
         modes.
@@ -770,7 +777,12 @@ class BaseDataObject(object):
         Parameters
         ----------
         num_eofs: int
-            How many modes to retain from the EOF decomposition.
+            How many modes to retain from the EOF decomposition.  Ignored if 
+            input_eofs is specified.
+        eof_in: ndarray, optional
+            A set of EOFs to project the data into.  First dimension should 
+            match the length of the data feature dimension.  Overrides 
+            num_eofs if provided.
         save: bool, optional
             Whether or not to save data in a new databin. (Default is True)
 
@@ -780,7 +792,6 @@ class BaseDataObject(object):
             Data projected into EOF basis.  Will have shape of (sampling dim
             x num EOFs).
         """
-        logger.info('Projecting data into leading {:d} EOFs'.format(num_eofs))
         if not self._leading_time:
             raise ValueError('Can only perform eof calculation with a '
                              'specified leading sampling dimension')
@@ -790,14 +801,28 @@ class BaseDataObject(object):
                            'than 2 dimensions. Flattening data...')
             self._flatten_curr_data()
 
+        if eof_in is not None:
+            if eof_in.shape[0] != self.data.shape[1]:
+                logger.error('Input EOFs feature dimension (length={}) does '
+                             'not match data feature dimension (length={})'
+                             ''.format(eof_in.shape[0], self.data.shape[1]))
+                raise ValueError('Feature dimension mismatch for input EOFs')
+
+            num_eofs = eof_in.shape[1]
+
+        logger.info('Projecting data into leading {:d} EOFs'.format(num_eofs))
+
         if save and not self._save_none:
             new_shp = (self.data.shape[0], num_eofs)
             self.eof_proj = self._new_empty_databin(new_shp,
                                                     self.data.dtype,
                                                     self._EOFPROJ)
 
-        self._eofs, self._svals = calc_eofs(self.data, num_eofs,
-                                            var_stats_dict=self._eof_stats)
+        if eof_in is None:
+            self._eofs, self._svals = calc_eofs(self.data, num_eofs,
+                                                var_stats_dict=self._eof_stats)
+        else:
+            self._eofs = eof_in
 
         if is_dask_array(self.data):
             proj = da.dot(self.data, self._eofs)
@@ -806,6 +831,7 @@ class BaseDataObject(object):
             self.eof_proj[:] = np.dot(self.data, self._eofs)
 
         self.data = self.eof_proj
+        self._add_to_operation_history(self._curr_data_key, self._EOFPROJ)
         self._set_curr_data_key(self._EOFPROJ)
 
         return self.data
@@ -977,14 +1003,14 @@ class BaseDataObject(object):
 
         deepcopy_items = {key: curr_dict.pop(key) for key in attrs_to_deepcopy}
 
-        # Unset all databin attributes
+        # Unset all attributes for other data bins
         for key in self._data_bins.keys():
             if key != self._curr_data_key:
                 curr_dict[key] = None
 
         curr_dict['data'] = None
         curr_dict['_data_bins'] = {}
-        ops_performed = {current_dkey: curr_dict['_ops_performed']}
+        ops_performed = {current_dkey: curr_dict['_ops_performed'][current_dkey]}
         curr_dict['_ops_performed'] = ops_performed
 
         deepcopied_attrs = deepcopy(deepcopy_items)
@@ -1002,7 +1028,7 @@ class BaseDataObject(object):
             time_coord = time_coord[data_indices]
             deepcopied_attrs['_dim_coords'][self.TIME] = (time_idx, time_coord)
             deepcopied_attrs['_time_shp'] = [sample_len]
-            data = data[data_indices]
+            data = data[data_indices, ...]
 
         curr_dict['_altered_time_coords'] = {current_dkey: time_coord}
 
@@ -1016,7 +1042,9 @@ class BaseDataObject(object):
         return new_obj
 
     def _helper_copy_new_databin(self, data_key, data, **kwargs):
-        self.data = self._new_databin(data, data_key)
+        databin = self._new_databin(data, data_key)
+        setattr(self, data_key, databin)
+        self.data = databin
         self._set_curr_data_key(data_key)
 
     @classmethod
@@ -1472,6 +1500,7 @@ class Hdf5DataObject(BaseDataObject):
     def _helper_copy_new_databin(self, data_key, data, data_group):
         self.set_databin_grp(data_group)
         self.data = self._new_databin(data, data_key)
+        setattr(self, data_key, self.data)
         self._set_curr_data_key(data_key)
 
     @classmethod
