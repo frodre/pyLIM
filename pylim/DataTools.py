@@ -467,7 +467,8 @@ class BaseDataObject(object):
 
         return self.data
 
-    def train_test_split_random(self, test_size=0.25, random_seed=None,
+    def train_test_split_random(self, test_size=0.1, random_seed=None,
+
                                 sample_lags=None):
 
         if random_seed is not None:
@@ -476,13 +477,18 @@ class BaseDataObject(object):
         sample_len = self._time_shp[0]
 
         if sample_lags is not None:
-            sample_len -= max(sample_lags)
+            test_sample_len -= max(sample_lags)
 
         if isinstance(test_size, float):
-            if test_size >= 1:
+            if test_size >= 1 or test_size <= 0:
                 raise ValueError('Testing sample size must be between 0.0 and '
                                  '1.0 if float is provided.')
-            test_samples = int(np.ceil(sample_len * test_size))
+            if sample_lags is not None and (test_size * len(sample_lags)) > 0.75:
+                raise ValueError('Test size and number of lagged samples to'
+                                  'include could comprise more than 75% of data'
+                                  '. Please lower the test size or lower the '
+                                  'number of sample lags.')
+            test_samples = int(np.ceil(test_sample_len * test_size))
         elif isinstance(test_size, int):
             test_samples = test_size
         else:
@@ -496,28 +502,49 @@ class BaseDataObject(object):
 
         test_indices = np.random.choice(sample_len, size=test_samples,
                                         replace=False)
-        train_indices = set(np.arange(sample_len)) - set(test_indices)
-        train_indices = np.array(list(train_indices))
+        test_set = set(test_indices)
+        for lag in sample_lags:
+            test_set = test_set | set(test_indices+lag)
+        train_set = set(np.arange(sample_len)) - set(test_set)
+        train_indices = list(train_set)
+        train_in_test = []
+        for lag in sample_lags:
+            for idx in train_indices:
+                if idx+lag in test_set:
+                    train_in_test.append(idx)
+        train_set = train_set - set(train_in_test)
+        train_indices = np.array(list(train_set))
 
         if sample_lags is None:
             sample_lags = []
+            max_lag = max(sample_lags)
 
         test_data = []
         training_data = []
         obj_data = getattr(self, self._curr_data_key)
 
-        # Add in t0 to the lags
-        sample_lags = [0] + list(sample_lags)
 
+        train_dobj = self.copy(data_indices=train_indices,
+                               data_group='/train_copy')
+
+        t0_train_indices, = np.where(train_indices+max_lag < sample_len)
+        training_data.append(t0_train_indices) 
+
+        for idx_adjust in sample_lags:
+            tn_train_indices = []
+            for i in t0_train_indices:
+                t0_idx = train_indices[i]
+                for j, tn_idx in enumerate(train_indices[i:]):
+                    if t0_idx+idx_adjust == tn_idx:
+                        tn_train_indices.append(i+j)
+                        break
+            training_data.append(tn_train_indices)
+
+        test_data.append(obj_data[test_indices, ...])
         for idx_adjust in sample_lags:
             test_data.append(obj_data[test_indices+idx_adjust, ...])
 
-            # Create subsampled data object copy
-            train_dobj = self.copy(data_indices=train_indices+idx_adjust,
-                                   data_group='/copy_lag{:d}'.format(idx_adjust))
-            training_data.append(train_dobj)
-
-        return test_data, training_data
+        return test_data, train_dobj, training_data
 
     def inflate_full_grid(self, data=None, expand_axis=-1, reshape_orig=False):
         """
