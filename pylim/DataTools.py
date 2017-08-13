@@ -458,7 +458,7 @@ class BaseDataObject(object):
 
         self._time_shp = [new_nsamples]
         time_idx, time_coord = self._dim_coords[self.TIME]
-        new_time_coord = time_coord[shift::nsamples_in_avg]
+        new_time_coord = time_coord[shift:-end_cutoff:nsamples_in_avg]
         self._dim_coords[self.TIME] = (time_idx, new_time_coord)
         self._altered_time_coords[key] = new_time_coord
 
@@ -467,8 +467,7 @@ class BaseDataObject(object):
 
         return self.data
 
-    def train_test_split_random(self, test_size=0.1, random_seed=None,
-
+    def train_test_split_random(self, test_size=0.25, random_seed=None,
                                 sample_lags=None):
 
         if random_seed is not None:
