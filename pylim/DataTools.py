@@ -1723,9 +1723,10 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
         time_out.attrs.units = times.units
 
         coord_dims = {'lat': lat.attrs, 'lon': lon.attrs,
+                      'j': lat.attrs, 'i': lon.attrs,
                       'time': time_out.attrs}
 
-        for i, key in enumerate(f.dimensions.iterkeys()):
+        for i, key in enumerate(data.dimensions):
             if key in coord_dims.keys():
                 coord_dims[key].index = i
     finally:
