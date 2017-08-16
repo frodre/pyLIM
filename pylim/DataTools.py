@@ -24,7 +24,7 @@ from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
 tb.parameters.NODE_CACHE_SLOTS = 0
 
 # Set the overflow cache for Dask operations
-CACHE = chest.Chest(available_memory=30e9,
+CACHE = chest.Chest(available_memory=16e9,
                     path='/home/katabatic/wperkins/scratch')
 dask.set_options(cache=CACHE)
 
@@ -254,6 +254,7 @@ class BaseDataObject(object):
             logger.debug('Flattening data over spatial dimensions. New shp: '
                          '{}'.format(self.data.shape))
 
+        self.orig = self._new_databin(self.data, self._ORIGDATA)
         self._add_to_operation_history(None, self._ORIGDATA)
         self._set_curr_data_key(self._ORIGDATA)
 
@@ -275,6 +276,8 @@ class BaseDataObject(object):
                                                      out_arr=self.compressed_data)
             self._add_to_operation_history(self._curr_data_key, self._COMPRESSED)
             self._set_curr_data_key(self._COMPRESSED)
+        else:
+            self.reset_data(self._ORIGDATA)
 
     def _set_curr_data_key(self, new_key):
         logger.debug('Setting current data key to: '.format(new_key))
@@ -476,7 +479,7 @@ class BaseDataObject(object):
         sample_len = self._time_shp[0]
 
         if sample_lags is not None:
-            test_sample_len -= max(sample_lags)
+            test_sample_len = sample_len - max(sample_lags)
 
         if isinstance(test_size, float):
             if test_size >= 1 or test_size <= 0:
@@ -484,9 +487,9 @@ class BaseDataObject(object):
                                  '1.0 if float is provided.')
             if sample_lags is not None and (test_size * len(sample_lags)) > 0.75:
                 raise ValueError('Test size and number of lagged samples to'
-                                  'include could comprise more than 75% of data'
-                                  '. Please lower the test size or lower the '
-                                  'number of sample lags.')
+                                 'include could comprise more than 75% of data'
+                                 '. Please lower the test size or lower the '
+                                 'number of sample lags.')
             test_samples = int(np.ceil(test_sample_len * test_size))
         elif isinstance(test_size, int):
             test_samples = test_size
@@ -499,7 +502,7 @@ class BaseDataObject(object):
                           'test_samples={:d}'.format(test_samples))
             raise ValueError('Provided testing sample size is too small.')
 
-        test_indices = np.random.choice(sample_len, size=test_samples,
+        test_indices = np.random.choice(test_sample_len, size=test_samples,
                                         replace=False)
         test_set = set(test_indices)
         for lag in sample_lags:
@@ -513,37 +516,37 @@ class BaseDataObject(object):
                     train_in_test.append(idx)
         train_set = train_set - set(train_in_test)
         train_indices = np.array(list(train_set))
+        train_indices = np.sort(train_indices)
 
         if sample_lags is None:
             sample_lags = []
+        else:
             max_lag = max(sample_lags)
 
         test_data = []
-        training_data = []
         obj_data = getattr(self, self._curr_data_key)
-
 
         train_dobj = self.copy(data_indices=train_indices,
                                data_group='/train_copy')
 
-        t0_train_indices, = np.where(train_indices+max_lag < sample_len)
-        training_data.append(t0_train_indices) 
-
+        lag_idx_training = {}
         for idx_adjust in sample_lags:
-            tn_train_indices = []
-            for i in t0_train_indices:
-                t0_idx = train_indices[i]
-                for j, tn_idx in enumerate(train_indices[i:]):
-                    if t0_idx+idx_adjust == tn_idx:
-                        tn_train_indices.append(i+j)
-                        break
-            training_data.append(tn_train_indices)
+            t0_idx_list = []
+            tlag_idx_list = []
+            for i, t0_idx in enumerate(train_indices):
+                for j, tlag_idx in enumerate(train_indices[i:]):
+                    if t0_idx + idx_adjust == tlag_idx:
+                        t0_idx_list.append(i)
+                        tlag_idx_list.append(i+j)
+            # TODO: should I warn if number of samples is small?
+            if t0_idx_list:
+                lag_idx_training[idx_adjust] = (t0_idx_list, tlag_idx_list)
 
         test_data.append(obj_data[test_indices, ...])
         for idx_adjust in sample_lags:
             test_data.append(obj_data[test_indices+idx_adjust, ...])
 
-        return test_data, train_dobj, training_data
+        return test_data, train_dobj, lag_idx_training
 
     def inflate_full_grid(self, data=None, expand_axis=-1, reshape_orig=False):
         """
@@ -651,6 +654,7 @@ class BaseDataObject(object):
 
         edge_pad = window_size // 2
         edge_trim = np.ceil(edge_pad / float(year_len)) * year_len
+        edge_trim = int(edge_trim)
 
         new_time_len = self.data.shape[0] - edge_trim * 2
         time_idx, old_time_coord = self._dim_coords[self.TIME]
@@ -781,7 +785,8 @@ class BaseDataObject(object):
         if self._rotated_pole:
             lats = self.get_coordinate_grids([self.EQUIVLAT])[self.EQUIVLAT]
         else:
-            lats = self.get_coordinate_grids([self.LAT])[self.LAT]
+            lats = self.get_coordinate_grids([self.LAT],
+                                             flat=self.forced_flat)[self.LAT]
         scale = np.sqrt(abs(np.cos(np.radians(lats))))
 
         if is_dask_array(self.data):
@@ -920,7 +925,7 @@ class BaseDataObject(object):
                 raise KeyError('No matching dimension for key ({}) was found.'
                                ''.format(key))
 
-            if key in self._coord_grids:
+            if self._coord_grids is not None and key in self._coord_grids:
                 grid = np.copy(self._coord_grids[key])
             else:
                 idx = self._dim_idx[key]
@@ -1043,6 +1048,7 @@ class BaseDataObject(object):
 
         data = self.data
         time_idx, time_coord = deepcopied_attrs['_dim_coords'][self.TIME]
+        time_coord = np.array(time_coord)
 
         # Adjust the time and data if resampling
         if data_indices is not None:
@@ -1378,8 +1384,11 @@ class Hdf5DataObject(BaseDataObject):
         logger.info('Checking dask array data for invalid elements.')
 
         finite_data = da.isfinite(data)
-        not_filled_data = data != self._fill_value
-        valid_data = da.logical_and(finite_data, not_filled_data)
+        if self._fill_value is not None:
+            not_filled_data = data != self._fill_value
+            valid_data = da.logical_and(finite_data, not_filled_data)
+        else:
+            valid_data = finite_data
 
         if self._leading_time:
             time_len = data.shape[0]
@@ -1696,7 +1705,10 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
 
         spatial_nbytes = np.product(data.shape[1:])*data.dtype.itemsize
         tchunk_60mb = 60*1024**2 // spatial_nbytes
-        fill_value = 1.0e20
+        try:
+            fill_value = data._FillValue
+        except AttributeError:
+            fill_value = 1.0e20
 
         masked = False
         for k in xrange(0, shape[0], tchunk_60mb):
@@ -1707,7 +1719,7 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
                     out.attrs.masked = True
                     out.attrs.fill_value = fill_value
             elif masked:
-                data_chunk = data[k:k+tchunk_60mb].filled(1.0e20)
+                data_chunk = data[k:k+tchunk_60mb].filled(fill_value)
             else:
                 data_chunk = data[k:k+tchunk_60mb]
 
