@@ -1718,6 +1718,7 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
                 if masked:
                     out.attrs.masked = True
                     out.attrs.fill_value = fill_value
+                    data_chunk = data_chunk.filled(fill_value)
             elif masked:
                 data_chunk = data[k:k+tchunk_60mb].filled(fill_value)
             else:
