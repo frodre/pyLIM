@@ -14,8 +14,8 @@ from matplotlib.colors import LinearSegmentedColormap
 from itertools import izip
 
 
-import Stats as St
-import DataTools as Dt
+import pylim.Stats as St
+import pylim.DataTools as Dt
 
 
 """ Methods to help with common LIM tasks."""

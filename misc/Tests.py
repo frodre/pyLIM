@@ -1,8 +1,10 @@
-import pylim.DataTools as DT
-import pylim.LIMTools as LT
-import pylim.LIM as LIM
-import tables as tb
 import os
+
+import tables as tb
+
+import pylim.DataTools as DT
+import pylim.LIM as LIM
+import pylim.old.LIMTools as LT
 
 CASE = 4
 

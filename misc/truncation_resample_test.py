@@ -1,13 +1,14 @@
 __author__ = 'wperkins'
-import tables as tb
 import os
+import sys
+
 import netCDF4 as ncf
 import numpy as np
-import sys
+import tables as tb
 from spharm import Spharmt, regrid
 
 import pylim.DataTools as DT
-import pylim.LIMTools as LT
+import pylim.old.LIMTools as LT
 from pylim import LIM
 
 sys.path.append('/home/disk/p/wperkins/Research/LMR/')
