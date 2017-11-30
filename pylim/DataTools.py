@@ -21,12 +21,12 @@ from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
                   dask_detrend_data, calc_eofs
 
 # Prevents any nodes in HDF5 file from being cached, saving space
-tb.parameters.NODE_CACHE_SLOTS = 0
+# tb.parameters.NODE_CACHE_SLOTS = 0
 
 # Set the overflow cache for Dask operations
-CACHE = chest.Chest(available_memory=16e9,
-                    path='/home/katabatic/wperkins/scratch')
-dask.set_options(cache=CACHE)
+# CACHE = chest.Chest(available_memory=16e9,
+#                     path='/home/katabatic/wperkins/scratch')
+# dask.set_options(cache=CACHE)
 
 # Initialize logging client for this module
 logger = logging.getLogger(__name__)
@@ -600,7 +600,6 @@ class BaseDataObject(object):
             if dim_len != self.valid_data.shape[0]:
                 valid_mask = np.expand_dims(valid_mask, dim_idx)
         valid_mask = np.logical_and(np.ones(shp), valid_mask)
-        print valid_mask.sum()
         full[valid_mask] = data.flatten()
 
         if reshape_orig:
@@ -943,11 +942,12 @@ class BaseDataObject(object):
                         grid = np.expand_dims(grid, dim)
 
                 grid = np.ones(self._spatial_shp) * grid
-                if self.is_masked and compressed:
-                    grid = grid.flatten()
-                    grid = grid[self.valid_data]
-                elif flat:
-                    grid = grid.flatten()
+
+            if self.is_masked and compressed:
+                grid = grid.flatten()
+                grid = grid[self.valid_data]
+            elif flat:
+                grid = grid.flatten()
 
             grids[key] = grid
 

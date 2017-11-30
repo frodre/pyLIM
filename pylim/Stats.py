@@ -124,7 +124,7 @@ def calc_anomaly(data, yrsize, climo=None, output_arr=None):
 
     # Use of data[:] should work for ndarray or ndarray-like
     if climo is None:
-        climo = data.mean(axis=0)
+        climo = data.mean(axis=0, keepdims=True)
 
     if is_dask_array(data):
         if output_arr is None:
@@ -137,9 +137,9 @@ def calc_anomaly(data, yrsize, climo=None, output_arr=None):
         out_climo = climo.compute()
     else:
         if output_arr is not None:
-            output_arr[:] = ne.evaluate('data - climo')
+            output_arr[:] = np.squeeze(ne.evaluate('data - climo'))
         else:
-            output_arr = ne.evaluate('data - climo')
+            output_arr = np.squeeze(ne.evaluate('data - climo'))
         output_arr = output_arr.reshape(old_shp)
         out_climo = climo
 
