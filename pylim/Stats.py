@@ -244,9 +244,9 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
             var_stats_dict['var_expl_by_mode'] = var_expl_by_mode
             var_stats_dict['var_expl_by_ret'] = var_expl_by_retained
         except TypeError as e:
-            print 'Must past dictionary type to var_stats_dict in order to ' \
-                  'output variance statistics.'
-            print e
+            print('Must past dictionary type to var_stats_dict in order to ' \
+                  'output variance statistics.')
+            print(e)
 
     if ret_pcs:
         return out_eofs, out_svals, out_pcs
@@ -371,7 +371,7 @@ def run_mean(data, window_size, trim_edge=None, output_arr=None):
             raise ValueError('Not enough data to trim edges. Please try with '
                              'trim_edge=None')
 
-    weights = [1.0/float(window_size) for _ in xrange(window_size)]
+    weights = [1.0/float(window_size) for _ in range(window_size)]
     if is_dask_array(data):
         if output_arr is None:
             raise ValueError('calc_anomaly requires an output array keyword '

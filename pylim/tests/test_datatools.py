@@ -163,7 +163,7 @@ def test_basedataobj_dim_matching():
               BDO.LON: (3, [-80, -90])}
     obj = BDO(data, dim_coords=coords)
     assert obj._leading_time
-    assert obj._dim_idx == {key: value[0] for key, value in coords.items()}
+    assert obj._dim_idx == {key: value[0] for key, value in list(coords.items())}
     assert data.shape[0] == obj._time_shp[0]
     assert data.shape[1:] == obj._spatial_shp
     assert data.shape == obj.data.shape
@@ -185,7 +185,7 @@ def test_basedataobj_dim_mismatched():
               BDO.LAT: (2, [45, 50, 55]),
               BDO.LON: (3, [-80, -90, 100])}
     obj = BDO(data, dim_coords=coords)
-    assert len(obj._dim_idx.keys()) == 2
+    assert len(list(obj._dim_idx.keys())) == 2
     assert BDO.TIME in obj._dim_idx
     assert BDO.LAT in obj._dim_idx
 
@@ -196,7 +196,7 @@ def test_basedataobj_dim_notime():
               BDO.LAT: (2, [45, 50, 55]),
               BDO.LON: (3, [-80, -90])}
     obj = BDO(data, dim_coords=coords)
-    assert len(obj._dim_idx.keys()) == 3
+    assert len(list(obj._dim_idx.keys())) == 3
     assert obj._full_shp == data.shape
 
 

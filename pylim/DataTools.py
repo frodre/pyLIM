@@ -12,12 +12,12 @@ import os.path as path
 import netCDF4 as ncf
 import numexpr as ne
 import chest
-import cPickle as cpk
+import pickle as cpk
 import logging
 
 from datetime import datetime, timedelta
 from copy import copy, deepcopy
-from Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
+from .Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
                   dask_detrend_data, calc_eofs
 
 # Prevents any nodes in HDF5 file from being cached, saving space
@@ -70,7 +70,7 @@ class BaseDataObject(object):
         Match each dimension key in dim_coords dict to the correct index of the
         shape.
         """
-        return {key: value[0] for key, value in dim_coords.items()
+        return {key: value[0] for key, value in list(dim_coords.items())
                 if shape[value[0]] == len(value[1])}
 
     def __init__(self, data, dim_coords=None, coord_grids=None,
@@ -150,7 +150,7 @@ class BaseDataObject(object):
 
         # Match dimension coordinate vectors
         if dim_coords is not None:
-            if self.TIME in dim_coords.keys():
+            if self.TIME in list(dim_coords.keys()):
                 time_idx, time_coord = dim_coords[self.TIME]
                 if time_idx != 0:
                     logger.error('Non-leading time dimension encountered in '
@@ -769,7 +769,7 @@ class BaseDataObject(object):
             Area-weighted data
         """
         logger.info('Area weighting data by latitude...')
-        if self.LAT not in self._dim_idx.keys():
+        if self.LAT not in list(self._dim_idx.keys()):
             logger.warning('No latitude dimension specified. No area weighting'
                            'was performed.')
             return self.data
@@ -887,7 +887,7 @@ class BaseDataObject(object):
         dim_coords = {}
 
         for key in keys:
-            if key in self._dim_coords.keys():
+            if key in list(self._dim_coords.keys()):
                 dim_coords[key] = self._dim_coords[key]
 
         return dim_coords
@@ -920,7 +920,7 @@ class BaseDataObject(object):
             keys.pop(self.TIME)
 
         for key in keys:
-            if key not in self._dim_idx.keys():
+            if key not in list(self._dim_idx.keys()):
                 raise KeyError('No matching dimension for key ({}) was found.'
                                ''.format(key))
 
@@ -1035,7 +1035,7 @@ class BaseDataObject(object):
         deepcopy_items = {key: curr_dict.pop(key) for key in attrs_to_deepcopy}
 
         # Unset all attributes for other data bins
-        for key in self._data_bins.keys():
+        for key in list(self._data_bins.keys()):
             if key != self._curr_data_key:
                 curr_dict[key] = None
 
@@ -1115,7 +1115,7 @@ class BaseDataObject(object):
                 cal = None
 
             for i, key in enumerate(data.dimensions):
-                if key in coords.keys():
+                if key in list(coords.keys()):
                     coords[key] = (i, coords[key])
 
             force_flat = kwargs.pop('force_flat', True)
@@ -1490,7 +1490,7 @@ class Hdf5DataObject(BaseDataObject):
         self._default_grp = None
 
         # Set all HDF5 file connections to None
-        for key in self._data_bins.keys():
+        for key in list(self._data_bins.keys()):
             setattr(self, key, None)
             tmp_bins[key] = self._data_bins[key]
             self._data_bins[key] = None
@@ -1501,7 +1501,7 @@ class Hdf5DataObject(BaseDataObject):
 
         self.h5f = h5f
         self.set_databin_grp(self._tb_file_args['grp'])
-        for key, dbin in tmp_bins.iteritems():
+        for key, dbin in tmp_bins.items():
             setattr(self, key, dbin)
             self._data_bins[key] = dbin
 
@@ -1564,7 +1564,7 @@ class Hdf5DataObject(BaseDataObject):
 
         h5f = tb.open_file(h5fname, mode='a', filters=filters)
 
-        for key in obj._data_bins.keys():
+        for key in list(obj._data_bins.keys()):
             node = h5f.get_node(group_path, key)
             obj._data_bins[key] = node
             setattr(obj, key, node)
@@ -1711,7 +1711,7 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
             fill_value = 1.0e20
 
         masked = False
-        for k in xrange(0, shape[0], tchunk_60mb):
+        for k in range(0, shape[0], tchunk_60mb):
             if k == 0:
                 data_chunk = data[k:k+tchunk_60mb]
                 masked = np.ma.is_masked(data_chunk)
@@ -1740,7 +1740,7 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
                       'time': time_out.attrs}
 
         for i, key in enumerate(data.dimensions):
-            if key in coord_dims.keys():
+            if key in list(coord_dims.keys()):
                 coord_dims[key].index = i
     finally:
         f.close()
@@ -1753,8 +1753,8 @@ def _handle_year_zero_units(time_as_num, tunits, calendar=None):
     fmt = '%Y-%d-%m %H:%M:%S'
     since_yr_idx = tunits.index('since ') + 6
     year = int(tunits[since_yr_idx:since_yr_idx+4])
-    year_diff = year - 0001
-    new_start_date = datetime(0001, 01, 01, 0, 0, 0)
+    year_diff = year - 0o001
+    new_start_date = datetime(0o001, 0o1, 0o1, 0, 0, 0)
 
     new_units = tunits[:since_yr_idx] + '0001-01-01 00:00:00'
     logger.debug('Converting numeric times using new units: ' + new_units)

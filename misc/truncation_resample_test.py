@@ -75,7 +75,7 @@ else:
     outf = '/home/chaos2/wperkins/data/pyLIM/truncated_20CR.h5'
 
 varname = 'air'
-fcast_times = range(1, 10)
+fcast_times = list(range(1, 10))
 hold_chk = 0.10
 trials = 20
 lag1 = True

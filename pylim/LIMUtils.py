@@ -1,7 +1,7 @@
 """
 Helper for running LIM Experiments
 """
-from itertools import izip
+
 import numpy as np
 
 
@@ -31,7 +31,7 @@ def create_state_vector(datakeys, state_members):
 
     start = end = 0
     state_positions = {}
-    for key, member in izip(datakeys, state_members):
+    for key, member in zip(datakeys, state_members):
         end += member.shape[-1]
         state_positions[key] = (start, end)
         start = end

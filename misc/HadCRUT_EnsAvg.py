@@ -40,7 +40,7 @@ ens_anom_out = outf.create_carray(outf.root, 'ens_members',
                    shape=ens_t_anoms.shape)
 
 
-for i in xrange(0, num_members):
+for i in range(0, num_members):
     f = nc4.Dataset(files.format(i+1))
     T_anom = f.variables['temperature_anomaly'][:]
     ens_t_anoms[i] = T_anom

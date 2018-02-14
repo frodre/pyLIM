@@ -20,7 +20,7 @@ full_neigs = 20
 f = tb.open_file(datafile, 'r')
 obs = f.root.data.obs.read()
 lats = f.root.data.lats.read()
-lats, trash = np.meshgrid(lats, xrange(192), indexing='ij')
+lats, trash = np.meshgrid(lats, range(192), indexing='ij')
 f.close()
 
 #Create the output file

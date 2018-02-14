@@ -12,7 +12,7 @@ if CASE == 1:
     filename = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
     outf = '/home/chaos2/wperkins/data/pyLIM/20CR_anomtest_detrended.h5'
     varname = 'air'
-    fcast_times = range(1, 10)
+    fcast_times = list(range(1, 10))
     hold_chk = 0.1
     trials = 30
     lag1 = True
@@ -23,7 +23,7 @@ elif CASE == 2:
     filename = '/home/chaos2/wperkins/data/ccsm4_last_mil/tas_Amon_CCSM4_past1000_r1i1p1_085001-185012.h5'
     outf = '/home/chaos2/wperkins/data/pyLIM/CCSM4_19fcast_50pcthold.h5'
     varname = 'tas'
-    fcast_times = range(10)
+    fcast_times = list(range(10))
     hold_chk = 0.5
     trials = 2
     lag1 = True
@@ -37,7 +37,7 @@ elif CASE == 3:
         filename = '/home/chaos2/wperkins/data/20CR/air.2m.mon.mean.nc'
         outf = '/home/chaos2/wperkins/data/pyLIM/20CR_check.h5'
     varname = 'air'
-    fcast_times = range(10)
+    fcast_times = list(range(10))
     hold_chk = 0.1
     trials = 30
     lag1 = True
@@ -51,7 +51,7 @@ elif CASE == 4:
         outf = '/home/chaos2/wperkins/data/pyLIM/CCSM4_19fcst_detrended.h5'
 
     varname = 'tas'
-    fcast_times = range(1, 10)
+    fcast_times = list(range(1, 10))
     hold_chk = 0.05
     trials = 20
     lag1 = True

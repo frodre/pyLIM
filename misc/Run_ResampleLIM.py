@@ -15,7 +15,7 @@ else:
     varname = 'tas'
 
 wsize = 12
-fcast_times = range(10)
+fcast_times = list(range(10))
 num_eigs = 20
 hold_chk = 0.05
 trials = 20

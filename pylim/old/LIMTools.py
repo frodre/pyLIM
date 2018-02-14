@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from mpl_toolkits.basemap import Basemap
 from matplotlib.colors import LinearSegmentedColormap
-from itertools import izip
+
 
 
 import pylim.Stats as St
@@ -99,7 +99,7 @@ def build_trial_fcast(fcast_trials, eofs):
     dat_shp = [t_shp[0]*t_shp[-1], eofs.shape[1]]
     phys_fcast = np.zeros(dat_shp, dtype=fcast_trials.dtype)
 
-    for i, (trial, eof) in enumerate(izip(fcast_trials, eofs)):
+    for i, (trial, eof) in enumerate(zip(fcast_trials, eofs)):
         i0 = i*t_shp[-1]  # i * (test time dimension)
         ie = i*t_shp[-1] + t_shp[-1]
 
@@ -286,7 +286,7 @@ def fcast_ce(h5file):
 
     # Calculate CE
     for i, lead in enumerate(fcast_times):
-        print 'Calculating CE: %i yr fcast' % lead
+        print('Calculating CE: %i yr fcast' % lead)
         compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
         data = fcasts[i].read()
         for j, trial in enumerate(data):
@@ -345,7 +345,7 @@ def fcast_corr_old(h5file):
 
     # Calculate LAC
     for i, lead in enumerate(fcast_times):
-        print 'Calculating Correlation: %i yr fcast' % lead
+        print('Calculating Correlation: %i yr fcast' % lead)
         compiled_obs = build_trial_obs(obs, test_start_idxs, lead*yrsize, test_tdim)
         data = fcasts[i].read()
         phys_fcast = build_trial_fcast(data, eofs)
@@ -417,7 +417,7 @@ def fcast_corr(h5file, avg_trial=False):
 
     # Calculate LAC
     for i, lead in enumerate(fcast_times):
-        print 'Calculating Correlation: %i yr fcast' % lead
+        print('Calculating Correlation: %i yr fcast' % lead)
         if avg_trial:
             # TODO: Significance is currently ignored for avg_trial
             corr_trials = np.zeros((len(fcasts[i]), eofs.shape[1]))

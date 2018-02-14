@@ -9,12 +9,12 @@ import numpy as np
 from numpy.linalg import pinv, cond, eigvals
 from math import ceil
 import tables as tb
-import cPickle as cpk
+import pickle as cpk
 import logging
 import time
 
-from Stats import calc_eofs
-import DataTools as Dt
+from .Stats import calc_eofs
+from . import DataTools as Dt
 
 
 logger = logging.getLogger(__name__)
@@ -164,7 +164,7 @@ class LIM(object):
         with open(filename, 'w') as f:
             cpk.dump(self, f)
 
-        print 'Saved pre-calibrated LIM to {}'.format(filename)
+        print('Saved pre-calibrated LIM to {}'.format(filename))
 
     @staticmethod
     def from_precalib(filename):
@@ -522,7 +522,7 @@ class ResampleLIM(LIM):
         obj is provided it will output the forecast to this file if desired.
         """
 
-        print 'Beginning resampling forecast experiment.'
+        print('Beginning resampling forecast experiment.')
 
         eof_shp = [self._num_trials,
                    self._data_obj.data.shape[1],
@@ -617,7 +617,7 @@ class ResampleLIM(LIM):
                 fcast_bin[j] = _fcast[i]
             _eofs_out[j] = _eofs
 
-            print 'Trial {} finished.'.format(j+1)
+            print('Trial {} finished.'.format(j+1))
 
         return _fcast_out, _eofs_out
 
