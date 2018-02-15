@@ -5,17 +5,15 @@ Author: Andre Perkins
 """
 
 import tables as tb
-import dask
 import dask.array as da
 import numpy as np
 import os.path as path
 import netCDF4 as ncf
 import numexpr as ne
-import chest
 import pickle as cpk
 import logging
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from copy import copy, deepcopy
 from .Stats import run_mean, calc_anomaly, detrend_data, is_dask_array, \
                   dask_detrend_data, calc_eofs

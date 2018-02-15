@@ -1,0 +1,23 @@
+name: pylim_env
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.*
+  - netCDF4
+  - numpy
+  - scipy
+  - matplotlib
+  - statsmodels
+  - pyyaml
+  - pandas
+  - pytest
+  - ipython
+  - jpeg
+  - cartopy
+  - pytables
+  - xarray
+  - dask
+  - scikit-learn
+  - numexpr
