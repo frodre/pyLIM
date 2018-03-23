@@ -445,6 +445,11 @@ class BaseDataObject(object):
         nsamples -= shift
         new_nsamples = nsamples // nsamples_in_avg
         end_cutoff = nsamples % nsamples_in_avg
+
+        if end_cutoff == 0:
+            end_cutoff = None
+        else:
+            end_cutoff = -end_cutoff
         spatial_shp = self.data.shape[1:]
         new_shape = [new_nsamples] + list(spatial_shp)
         avg_shape = [new_nsamples, nsamples_in_avg] + list(spatial_shp)
@@ -452,14 +457,16 @@ class BaseDataObject(object):
         new_bin = self._new_empty_databin(new_shape, self.data.dtype, key)
         setattr(self, key, new_bin)
 
-        self.data = self.data[shift:-end_cutoff]
+        tmp_slice = slice(shift, end_cutoff)
+        self.data = self.data[tmp_slice]
         self.data = self.data.reshape(avg_shape)
 
         self.data = self._avg_func(self.data, output_arr=new_bin)
 
         self._time_shp = [new_nsamples]
         time_idx, time_coord = self._dim_coords[self.TIME]
-        new_time_coord = time_coord[shift:-end_cutoff:nsamples_in_avg]
+        tmp_slice = slice(shift, end_cutoff, nsamples_in_avg)
+        new_time_coord = time_coord[tmp_slice]
         self._dim_coords[self.TIME] = (time_idx, new_time_coord)
         self._altered_time_coords[key] = new_time_coord
 
@@ -982,7 +989,7 @@ class BaseDataObject(object):
                                    **kwargs)
         self._dim_coords[self.TIME] = (tmp_dimcoord[0], topckl_time)
 
-        with open(filename, 'w') as f:
+        with open(filename, 'wb') as f:
             cpk.dump(self, f)
 
         self._dim_coords[self.TIME] = (tmp_dimcoord[0], tmp_time)
@@ -1186,7 +1193,7 @@ class BaseDataObject(object):
         logging.info('Loading data object from pickle.\n'
                      'file = {}'.format(filename))
 
-        with open(filename, 'r') as f:
+        with open(filename, 'rb') as f:
             dobj = cpk.load(f)
 
         tmp_dimcoord = dobj._dim_coords[dobj.TIME]

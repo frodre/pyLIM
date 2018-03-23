@@ -146,34 +146,34 @@ def calc_anomaly(data, yrsize, climo=None, output_arr=None):
     return output_arr, out_climo
 
 
-def calc_ce(fcast, trial_obs, obs):
-    """
-    Method to calculate the Coefficient of Efficiency as defined by Nash and
-    Sutcliffe 1970.
-
-    Parameters
-    ----------
-    fcast: ndarray
-        Time series of forecast data. M x N where M is the temporal dimension.
-    obs: ndarray
-        Time series of observations. M x N
-
-    Returns
-    -------
-    CE: ndarray
-        Coefficient of efficiency for all locations over the time range.
-    """
-
-    assert(fcast.shape == trial_obs.shape)
-
-    # Climatological variance
-    cvar = obs.var(axis=0, ddof=1)
-
-    # Error variance
-    error = ne.evaluate('(trial_obs - fcast)**2')
-    evar = error.sum(axis=0)/(len(error))
-
-    return 1 - evar/cvar
+# def calc_ce(fcast, trial_obs, obs):
+#     """
+#     Method to calculate the Coefficient of Efficiency as defined by Nash and
+#     Sutcliffe 1970.
+#
+#     Parameters
+#     ----------
+#     fcast: ndarray
+#         Time series of forecast data. M x N where M is the temporal dimension.
+#     obs: ndarray
+#         Time series of observations. M x N
+#
+#     Returns
+#     -------
+#     CE: ndarray
+#         Coefficient of efficiency for all locations over the time range.
+#     """
+#
+#     assert(fcast.shape == trial_obs.shape)
+#
+#     # Climatological variance
+#     cvar = obs.var(axis=0, ddof=1)
+#
+#     # Error variance
+#     error = ne.evaluate('(trial_obs - fcast)**2')
+#     evar = error.sum(axis=0)/(len(error))
+#
+#     return 1 - evar/cvar
 
 
 def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
@@ -291,6 +291,22 @@ def calc_lac(fcast, obs):
     std = f_std * o_std
 
     return cov / std
+
+
+def calc_mse(fcast, obs):
+    sq_err = ne.evaluate('(obs - fcast)**2')
+    mse = sq_err.mean(axis=0)
+    return mse
+
+
+def calc_ce(fcast, obs):
+
+    sq_err = ne.evaluate('(obs - fcast)**2')
+    obs_mean = obs.mean(axis=0)
+    obs_var = ne.evaluate('(obs - obs_mean)**2')
+
+    ce = 1 - (sq_err.sum(axis=0) / obs_var.sum(axis=0))
+    return ce
 
 
 def calc_n_eff(data1, data2=None):

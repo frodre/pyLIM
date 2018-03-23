@@ -6,7 +6,7 @@ Author: Andre Perkins
 """
 
 import numpy as np
-from numpy.linalg import pinv, cond, eigvals
+from numpy.linalg import pinv, eigvals
 from math import ceil
 import tables as tb
 import pickle as cpk
@@ -56,12 +56,6 @@ def _calc_m(x0, xt, tau=1):
     if np.any(Leigs.real >= 0):
         logger.debug('L eigenvalues: \n' + str(Leigs))
         raise ValueError('Positive eigenvalues detected in forecast matrix L.')
-
-    # C0_cond = cond(x0x0)
-    # if C0_cond > 20:
-    #     logger.warn(('C_0 condition number is large ({:2.2f}). Too many '
-    #                  'features (or EOFs) are likely provided and further '
-    #                  'truncation is suggested.'.format(C0_cond)))
 
     return G
 

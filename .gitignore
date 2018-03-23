@@ -73,4 +73,5 @@ matplotlibrc
 *.mp4
 src/test.py
 
+.pytest_cache/*
 scratch/*
