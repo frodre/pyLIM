@@ -791,6 +791,7 @@ class BaseDataObject(object):
         else:
             lats = self.get_coordinate_grids([self.LAT],
                                              flat=self.forced_flat)[self.LAT]
+        # TODO: Add optional sqrt for global avg vs. covariance usage
         scale = np.sqrt(abs(np.cos(np.radians(lats))))
 
         if is_dask_array(self.data):

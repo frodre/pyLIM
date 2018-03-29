@@ -6,7 +6,7 @@ Author: Andre Perkins
 """
 
 import numpy as np
-from numpy.linalg import pinv, eigvals
+from numpy.linalg import pinv, eigvals, eig
 from math import ceil
 import tables as tb
 import pickle as cpk
@@ -103,7 +103,8 @@ class LIM(object):
     ....
     """
 
-    def __init__(self, tau0_data, tau1_data=None, nelem_in_tau1=1, h5file=None):
+    def __init__(self, tau0_data, tau1_data=None, nelem_in_tau1=1,
+                 fit_noise=False, h5file=None):
         """
         Parameters
         ----------
@@ -151,7 +152,76 @@ class LIM(object):
             x0 = tau0_data[0:-nelem_in_tau1, :]
             x1 = tau0_data[nelem_in_tau1:, :]
 
-        self.G_1 = _calc_m(x0, x1, tau=1)
+        self.G_1 = self._calc_m(x0, x1, tau=1)
+
+        if fit_noise:
+            [self.L,
+             self.Q_evals,
+             self.Q_evects] = self._calc_Q(self.G_1, x0, tau=1)
+
+    @staticmethod
+    def _calc_m(x0, xt, tau=1):
+        """Calculate either L or G for forecasting (using nomenclature
+        from Newman 2013
+
+        Parameters
+        ----------
+        x0: ndarray
+            State at time=0.  MxN where M is number of samples, and N is the 
+            number of features.
+        xt: ndarray
+            State at time=tau.  MxN where M is number of samples, and N is the 
+            number of fatures.
+        tau: float
+            lag time (in units of tau) that we are calculating G for.  This is 
+            used to check that all modes of L are damped.
+
+
+        """
+
+        # These represent the C(tau) and C(0) covariance matrices
+        #    Note: x is an anomaly vector, no division by N-1 because it's undone
+        #    in the inversion anyways
+
+        # Division by number of samples ignored due to inverse
+        x0x0 = np.dot(x0.T, x0)
+        x0xt = np.dot(xt.T, x0)
+
+        # Calculate the mapping term G_tau
+        G = np.dot(x0xt, pinv(x0x0))
+
+        # Calculate the forcing matrix to check that all modes are damped
+        Geigs = eigvals(G)
+        Leigs = (1. / tau) * np.log(Geigs)
+
+        if np.any(Leigs.real >= 0):
+            logger.debug('L eigenvalues: \n' + str(Leigs))
+            raise ValueError(
+                'Positive eigenvalues detected in forecast matrix L.')
+
+        return G
+
+    @staticmethod
+    def _calc_Q(G, x0, tau=1):
+        C0 = x0.T @ x0 / x0.shape[0]  # State covariance
+        G_eval, G_evects = eig(G)
+        L_evals = (1/tau) * np.log(G_eval)
+        L = G_evects @ np.diag(L_evals) @ pinv(G_evects)
+        L = L.real
+        Q = -(L @ C0 + C0 @ L.T)  # Noise covariance
+
+        q_evals, q_evects = eig(Q)
+        sort_idx = q_evals.argsort()
+        q_evals = q_evals[sort_idx][::-1]
+        q_evects = q_evects[:, sort_idx][:, ::-1]
+
+        if np.any(q_evals < 0):
+            num_neg = (q_evals < 0).sum()
+            logger.debug('Found {:d} modes with negative eigenvalues in'
+                         ' the noise covariance term, Q.'.format(num_neg))
+            raise ValueError('Negative eigenvalues of Q detected.')
+
+        return L, q_evals, q_evects
 
     def save_precalib(self, filename):
 
@@ -234,6 +304,31 @@ class LIM(object):
                 fcast_out[i] = xf.T
 
         return fcast_out
+
+    def noise_integration(self, t0_data, length, timesteps=720,
+                          out_arr=None):
+
+        # t0_data comes in as sample x spatial
+        L = self.L
+        Q_eval = self.Q_evals[:, None]
+        Q_evec = self.Q_evects
+        tdelta = 1/timesteps
+        integration_steps = int(2*timesteps * length)
+        num_evals = Q_eval.shape[0]
+
+        state_1 = t0_data.T
+
+        for i in range(integration_steps):
+            deterministic = (L @ state_1) * tdelta
+            random = np.random.normal(size=num_evals)[:, None]
+            stochastic = Q_evec @ (np.sqrt(Q_eval * tdelta) * random)
+            state_2 = state_1 + deterministic + stochastic
+            state_mid = (state_1 + state_2) / 2
+            state_1 = state_mid
+            if out_arr is not None and i % 2 == 0:
+                out_arr[i//2] = state_mid.T
+
+        return state_mid.T
 
 
 class ParamReducedLIM(LIM):
