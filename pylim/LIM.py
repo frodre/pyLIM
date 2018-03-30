@@ -306,7 +306,10 @@ class LIM(object):
         return fcast_out
 
     def noise_integration(self, t0_data, length, timesteps=720,
-                          out_arr=None):
+                          out_arr=None, seed=None):
+
+        if seed is not None:
+            np.random.seed(seed)
 
         # t0_data comes in as sample x spatial
         L = self.L
