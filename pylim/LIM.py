@@ -318,13 +318,14 @@ class LIM(object):
         tdelta = 1/timesteps
         integration_steps = int(2*timesteps * length)
         num_evals = Q_eval.shape[0]
+        nens = t0_data.shape[0]
 
         state_1 = t0_data.T
 
         for i in range(integration_steps):
             deterministic = (L @ state_1) * tdelta
-            random = np.random.normal(size=num_evals)[:, None]
-            stochastic = Q_evec @ (np.sqrt(Q_eval * tdelta) * random)
+            random = np.random.normal(size=(num_evals, nens))
+            stochastic = (Q_evec @ np.sqrt(Q_eval * tdelta)) * random
             state_2 = state_1 + deterministic + stochastic
             state_mid = (state_1 + state_2) / 2
             state_1 = state_mid
