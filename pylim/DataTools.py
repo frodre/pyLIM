@@ -50,7 +50,6 @@ class BaseDataObject(object):
     LEVEL = 'level'
     LAT = 'lat'
     LON = 'lon'
-    EQUIVLAT = 'equiv_lat'
 
     # Static databin keys
     _COMPRESSED = 'compressed_data'
@@ -74,7 +73,7 @@ class BaseDataObject(object):
     def __init__(self, data, dim_coords=None, coord_grids=None,
                  valid_data=None, force_flat=False,
                  save_none=False, time_units=None, time_cal=None,
-                 fill_value=None, rotated_pole=False):
+                 fill_value=None):
         """
         Construction of a DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -111,8 +110,6 @@ class BaseDataObject(object):
         fill_value: float
             Value to be considered invalid data during the mask and 
             compression. Only considered when data is not masked.
-        rotated_pole: bool, optional
-            Whether or not the grid is on a rotated pole grid
         """
 
         logger.info('Initializing data object from {}'.format(self.__class__))
@@ -123,7 +120,6 @@ class BaseDataObject(object):
         self.time_units = time_units
         self.time_cal = time_cal
         self._coord_grids = coord_grids
-        self._rotated_pole = rotated_pole
         self._fill_value = fill_value
         self._save_none = save_none
         self._data_bins = {}
@@ -172,18 +168,6 @@ class BaseDataObject(object):
             self._time_shp = []
             self._spatial_shp = self._full_shp
             self._dim_idx = None
-
-        # Rough method to provide lats for area weighting
-        if rotated_pole:
-            lat_idx = self._dim_idx[self.LAT]
-            lat = self._dim_coords.get(self.LAT, None)
-            if lat is not None:
-                nlats = self._full_shp[lat_idx]
-                bnds = np.linspace(-90, 90, nlats+1)
-                centers = (bnds[:-1] + bnds[1:]) / 2.
-                equiv_dim_coord = (lat_idx, centers)
-                self._dim_coords[self.EQUIVLAT] = equiv_dim_coord
-                self._dim_idx[self.EQUIVLAT] = lat_idx
 
         self._flat_spatial_shp = [np.product(self._spatial_shp)]
 
@@ -784,15 +768,7 @@ class BaseDataObject(object):
                                                          self.data.dtype,
                                                          self._AWGHT)
 
-        # If pole is rotated the latitude weighting will be off, need latitude
-        # on an equivalent unrotated grid to properly weight by area
-        if self._rotated_pole:
-            lats = self.get_coordinate_grids([self.EQUIVLAT])[self.EQUIVLAT]
-        else:
-            lats = self.get_coordinate_grids([self.LAT],
-                                             flat=self.forced_flat)[self.LAT]
-        # TODO: Add optional sqrt for global avg vs. covariance usage
-        scale = np.sqrt(abs(np.cos(np.radians(lats))))
+        scale = self.cell_area / self.cell_area.sum()
 
         if is_dask_array(self.data):
             awgt = self.data * scale
@@ -1243,7 +1219,7 @@ class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
                  force_flat=False, fill_value=None, chunk_shape=None,
-                 default_grp='/data', rotated_pole=False, coord_grids=None,
+                 default_grp='/data', coord_grids=None,
                  time_units=None, time_cal=None):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
@@ -1310,7 +1286,6 @@ class Hdf5DataObject(BaseDataObject):
                                              valid_data=valid_data,
                                              force_flat=force_flat,
                                              fill_value=fill_value,
-                                             rotated_pole=rotated_pole,
                                              coord_grids=coord_grids,
                                              time_cal=time_cal,
                                              time_units=time_units)
