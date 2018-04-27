@@ -811,7 +811,8 @@ class BaseDataObject(object):
         self._add_to_operation_history(self._curr_data_key, self._AWGHT)
         self._set_curr_data_key(self._AWGHT)
 
-    def eof_proj_data(self, num_eofs=10, eof_in=None, save=True):
+    def eof_proj_data(self, num_eofs=10, eof_in=None, save=True,
+                      calc_on_key=None, proj_key=None):
         """
         Calculate spatial EOFs on the data retaining a specified number of
         modes.
@@ -827,6 +828,12 @@ class BaseDataObject(object):
             num_eofs if provided.
         save: bool, optional
             Whether or not to save data in a new databin. (Default is True)
+        calc_on_key: str, optional
+            Field key to calculate the EOF basis on. Defaults to the 
+            area-weighted data.
+        proj_key: str, optional
+            Field to project onto the EOF basis.  Defaults to the current data
+            if no key is provided.
 
         Returns
         -------
@@ -837,6 +844,9 @@ class BaseDataObject(object):
         if not self._leading_time:
             raise ValueError('Can only perform eof calculation with a '
                              'specified leading sampling dimension')
+
+        if calc_on_key is None and self._curr_data_key != self._AWGHT:
+            self.reset_data(self._AWGHT)
 
         if len(self.data.shape) > 2:
             logger.warning('Cannot perform EOF calculation on data with more '
@@ -854,18 +864,20 @@ class BaseDataObject(object):
 
         logger.info('Projecting data into leading {:d} EOFs'.format(num_eofs))
 
-        if save and not self._save_none:
-            new_shp = (self.data.shape[0], num_eofs)
-            self.eof_proj = self._new_empty_databin(new_shp,
-                                                    self.data.dtype,
-                                                    self._EOFPROJ)
-
         if eof_in is None:
             self._eofs, self._svals = calc_eofs(self.data, num_eofs,
                                                 var_stats_dict=self._eof_stats)
         else:
             self._eofs = eof_in
 
+        if proj_key is not None:
+            self.reset_data(proj_key)
+
+        if save and not self._save_none:
+            new_shp = (self.data.shape[0], num_eofs)
+            self.eof_proj = self._new_empty_databin(new_shp,
+                                                    self.data.dtype,
+                                                    self._EOFPROJ)
         if is_dask_array(self.data):
             proj = da.dot(self.data, self._eofs)
             da.store(proj, self.eof_proj)
