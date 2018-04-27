@@ -71,7 +71,8 @@ class BaseDataObject(object):
                 if shape[value[0]] == len(value[1])}
 
     def __init__(self, data, dim_coords=None, coord_grids=None,
-                 valid_data=None, force_flat=False,
+                 valid_data=None, force_flat=False, cell_area=None,
+                 irregular_grid=False,
                  save_none=False, time_units=None, time_cal=None,
                  fill_value=None):
         """
@@ -98,6 +99,10 @@ class BaseDataObject(object):
             greater than or equal to the spatial dimensions of data.
         force_flat: bool, optional
             Force spatial dimensions to be flattened (1D array)
+        cell_area: ndarray, optional
+            Grid cell areas used for area weighting the data.
+        irregular_grid: bool, optional
+            Whether or not the source grid is regular. Default: False
         save_none: bool, optional
             If true, data object will not save any of the intermediate
             calculation data.
@@ -119,6 +124,8 @@ class BaseDataObject(object):
         self.forced_flat = force_flat
         self.time_units = time_units
         self.time_cal = time_cal
+        self.cell_area = cell_area
+        self.irregular_grid = irregular_grid
         self._coord_grids = coord_grids
         self._fill_value = fill_value
         self._save_none = save_none
@@ -361,6 +368,10 @@ class BaseDataObject(object):
             compress_axis = None
 
         out_arr = np.compress(valid_mask, data, axis=compress_axis, out=out_arr)
+
+        if self.cell_area is not None:
+            self.cell_area = np.compress(valid_mask, self.cell_area)
+
         return out_arr
 
     def _flatten_curr_data(self):
@@ -371,6 +382,9 @@ class BaseDataObject(object):
             self.data = self.data.reshape(self._time_shp + self._flat_spatial_shp)
         else:
             self.data = self.data.reshape(self._flat_spatial_shp)
+
+        if self.cell_area is not None:
+            self.cell_area = self.cell_area.reshape(self._flat_spatial_shp)
 
     def _set_time_coord(self, key, time_len_of_data):
         """
@@ -739,16 +753,16 @@ class BaseDataObject(object):
         self._set_curr_data_key(self._DETRENDED)
         return self.data
 
-    def area_weight_data(self, save=True):
+    def area_weight_data(self, use_sqrt=True, save=True):
         """
-        Perform a gridcell area weighting by latitude on the data. Required
-        before EOF projection.
-
-        TODO: Figure out what correct way to handle rotated pole grids
-        (Maybe equivalent latitude field?)
+        Perform a gridcell area weighting using provided areas or latitudes if
+        field is regularly grided and cell areas are not loaded.
 
         Parameters
         ----------
+        use_sqrt: bool, optional
+            Use square root of weight matrix. Useful for when data will be
+            used in quadratic calculations. (E.g. PCA)
         save: bool, optional
             Whether or not to save data in a new databin. (Default is True)
 
@@ -757,18 +771,34 @@ class BaseDataObject(object):
         ndarray-like
             Area-weighted data
         """
-        logger.info('Area weighting data by latitude...')
-        if self.LAT not in list(self._dim_idx.keys()):
-            logger.warning('No latitude dimension specified. No area weighting'
-                           'was performed.')
-            return self.data
+        if self.cell_area is None and self.irregular_grid:
+            raise ValueError('Cell areas are required to area-weight a '
+                             'non-regular grid.')
+        elif self.cell_area is None and not self.irregular_grid:
+            do_lat_based = True
+            if self.LAT not in list(self._dim_idx.keys()):
+                raise ValueError('Cell area or latitude dimension are not '
+                                 'specified.  Required for grid cell area '
+                                 'weighting.')
+            logger.info('Area-weighting by latitude.')
+        else:
+            logger.info('Area-weighting using cell area')
+            do_lat_based = False
 
         if save and not self._save_none:
             self.area_weighted = self._new_empty_databin(self.data.shape,
                                                          self.data.dtype,
                                                          self._AWGHT)
 
-        scale = self.cell_area / self.cell_area.sum()
+        if do_lat_based:
+            lat = self.get_coordinate_grids([self.LAT],
+                                            flat=self.forced_flat)[self.LAT]
+            scale = abs(np.cos(np.radians(lat)))
+        else:
+            scale = self.cell_area / self.cell_area.sum()
+
+        if use_sqrt:
+            scale = np.sqrt(scale)
 
         if is_dask_array(self.data):
             awgt = self.data * scale
@@ -1061,12 +1091,29 @@ class BaseDataObject(object):
         self.data = databin
         self._set_curr_data_key(data_key)
 
+    @staticmethod
+    def _load_cell_area(cell_area_path):
+
+        if cell_area_path is None:
+            return None
+
+        logger.info('Loading grid cell area from : {}'.format(cell_area_path))
+        ca_fname = path.split(cell_area_path)[-1]
+        ca_var = ca_fname.split('_')[0]
+
+        f = ncf.Dataset(cell_area_path, 'r')
+        cell_area = f.variables[ca_var][:]
+
+        return cell_area
+
     @classmethod
-    def from_netcdf(cls, filename, var_name, **kwargs):
+    def from_netcdf(cls, filename, var_name, cell_area_path=None, **kwargs):
 
         logging.info('Loading data object from netcdf: \n'
                      'file = {}\n'
                      'var_name = {}'.format(filename, var_name))
+
+        cell_area = cls._load_cell_area(cell_area_path)
 
         with ncf.Dataset(filename, 'r') as f:
             data = f.variables[var_name]
@@ -1074,13 +1121,17 @@ class BaseDataObject(object):
             lon = f.variables['lon']
 
             if len(lat.shape) > 1:
+                irregular_grid = True
                 lat_grid = lat
                 lon_grid = lon
+
+                # TODO: Should I just fill these with dummy dimensions?
                 lat = lat[:, 0]
                 lon = lon[0]
                 grids = {BaseDataObject.LAT: lat_grid[:],
                          BaseDataObject.LON: lon_grid[:]}
             else:
+                irregular_grid = False
                 grids = None
 
             coords = {BaseDataObject.LAT: lat[:],
@@ -1103,14 +1154,18 @@ class BaseDataObject(object):
             force_flat = kwargs.pop('force_flat', True)
             return cls(data, dim_coords=coords, force_flat=force_flat,
                        time_units=times.units, time_cal=cal, coord_grids=grids,
+                       cell_area=cell_area, irregular_grid=irregular_grid,
                        **kwargs)
 
     @classmethod
-    def from_hdf5(cls, filename, var_name, data_dir='/', **kwargs):
+    def from_hdf5(cls, filename, var_name, data_dir='/',
+                  cell_area_path=None, **kwargs):
 
         logging.info('Loading data object from HDF5: \n'
                      'file = {}\n'
                      'var_name = {}'.format(filename, var_name))
+
+        cell_area = cls._load_cell_area(cell_area_path)
 
         with tb.open_file(filename, 'r') as f:
 
@@ -1126,13 +1181,17 @@ class BaseDataObject(object):
             lon_idx = lon.attrs.index
 
             if len(lat.shape) > 1:
+                irregular_grid = True
                 lat_grid = lat
                 lon_grid = lon
+
+                # TODO: Should I just fill these with dummy dimensions?
                 lat = lat[:, 0]
                 lon = lon[0]
                 grids = {BaseDataObject.LAT: lat_grid[:],
                          BaseDataObject.LON: lon_grid[:]}
             else:
+                irregular_grid = False
                 grids = None
 
             coords = {BaseDataObject.LAT: (lat_idx, lat[:]),
@@ -1163,7 +1222,9 @@ class BaseDataObject(object):
             force_flat = kwargs.pop('force_flat', True)
             return cls(data, dim_coords=coords, force_flat=force_flat,
                        coord_grids=grids, fill_value=fill_val,
-                       time_units=time_units, time_cal=time_cal, **kwargs)
+                       time_units=time_units, time_cal=time_cal,
+                       cell_area=cell_area, irregular_grid=irregular_grid,
+                       **kwargs)
 
     @classmethod
     def from_pickle(cls, filename):
@@ -1219,8 +1280,8 @@ class Hdf5DataObject(BaseDataObject):
 
     def __init__(self, data, h5file, dim_coords=None, valid_data=None,
                  force_flat=False, fill_value=None, chunk_shape=None,
-                 default_grp='/data', coord_grids=None,
-                 time_units=None, time_cal=None):
+                 default_grp='/data', coord_grids=None, cell_area=None,
+                 time_units=None, time_cal=None, irregular_grid=False):
         """
         Construction of a Hdf5DataObject from input data.  If nan or
         infinite values are present, a compressed version of the data
@@ -1286,6 +1347,8 @@ class Hdf5DataObject(BaseDataObject):
                                              valid_data=valid_data,
                                              force_flat=force_flat,
                                              fill_value=fill_value,
+                                             cell_area=cell_area,
+                                             irregular_grid=irregular_grid,
                                              coord_grids=coord_grids,
                                              time_cal=time_cal,
                                              time_units=time_units)
@@ -1393,6 +1456,10 @@ class Hdf5DataObject(BaseDataObject):
 
         compressed_data = da.compress(valid, data, axis=compress_axis)
         da.store(compressed_data, out_arr)
+
+        if self.cell_area is not None:
+            self.cell_area = np.compress(valid, self.cell_area)
+
         return out_arr
 
     @staticmethod
@@ -1520,17 +1587,22 @@ class Hdf5DataObject(BaseDataObject):
         self._set_curr_data_key(data_key)
 
     @classmethod
-    def from_netcdf(cls, filename, var_name, h5file, **kwargs):
+    def from_netcdf(cls, filename, var_name, h5file,
+                    cell_area_path=None, **kwargs):
 
         return super(Hdf5DataObject, cls).from_netcdf(filename, var_name,
-                                                      h5file=h5file, **kwargs)
+                                                      h5file=h5file,
+                                                      cell_area_path=cell_area_path,
+                                                      **kwargs)
 
     @classmethod
-    def from_hdf5(cls, filename, var_name, h5file, data_dir='/', **kwargs):
+    def from_hdf5(cls, filename, var_name, h5file, data_dir='/',
+                  cell_area_path=None, **kwargs):
 
         return super(Hdf5DataObject, cls).from_hdf5(filename, var_name,
                                                     h5file=h5file,
                                                     data_dir=data_dir,
+                                                    cell_area_path=cell_area_path,
                                                     **kwargs)
 
     @classmethod
