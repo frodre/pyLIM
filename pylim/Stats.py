@@ -207,11 +207,14 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
 
     if is_dask_array(data):
         pcs, full_svals, eofs = da.linalg.svd_compressed(data, num_eigs)
+        var = da.var(data, axis=0)
 
         out_svals = np.zeros(num_eigs)
         out_eofs = np.zeros((num_eigs, data.shape[1]))
         out_pcs = np.zeros((data.shape[0], num_eigs))
-        da.store([eofs, full_svals, pcs], [out_eofs, out_svals, out_pcs])
+        out_var = np.zeros((data.shape[1]))
+        da.store([eofs, full_svals, pcs, var],
+                 [out_eofs, out_svals, out_pcs, out_var])
 
         out_eofs = out_eofs.T
         out_pcs = out_pcs.T
@@ -225,14 +228,15 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
         out_eofs = eofs[:, :num_eigs]
         out_svals = full_svals[:num_eigs]
         out_pcs = pcs[:num_eigs]
+        out_var = data[:].var(ddof=1, axis=0)
 
     # variance stats
     if var_stats_dict is not None:
         try:
             nt = data.shape[0]
             ns = data.shape[1]
-            eig_vals = (full_svals ** 2) / (nt * ns)
-            total_var = eig_vals.sum()
+            eig_vals = (out_svals ** 2) / nt
+            total_var = out_var.sum()
             var_expl_by_mode = eig_vals / total_var
             var_expl_by_retained = var_expl_by_mode[0:num_eigs].sum()
 

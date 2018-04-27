@@ -847,6 +847,7 @@ class BaseDataObject(object):
 
         if calc_on_key is None and self._curr_data_key != self._AWGHT:
             self.reset_data(self._AWGHT)
+            calc_on_key = self._AWGHT
 
         if len(self.data.shape) > 2:
             logger.warning('Cannot perform EOF calculation on data with more '
@@ -865,6 +866,8 @@ class BaseDataObject(object):
         logger.info('Projecting data into leading {:d} EOFs'.format(num_eofs))
 
         if eof_in is None:
+            self._eof_stats = {}
+            self._eof_stats['calc_on'] = calc_on_key
             self._eofs, self._svals = calc_eofs(self.data, num_eofs,
                                                 var_stats_dict=self._eof_stats)
         else:
@@ -889,6 +892,9 @@ class BaseDataObject(object):
         self._set_curr_data_key(self._EOFPROJ)
 
         return self.data
+
+    def get_eof_stats(self):
+        return deepcopy(self._eof_stats)
 
     # TODO: Make this return copies of dim_coord information
     def get_dim_coords(self, keys):
