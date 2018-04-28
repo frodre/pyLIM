@@ -219,10 +219,6 @@ def calc_eofs(data, num_eigs, ret_pcs=False, var_stats_dict=None):
         out_eofs = out_eofs.T
         out_pcs = out_pcs.T
 
-        if var_stats_dict is not None:
-            logger.warning('Cannot currently provide variance statistics for '
-                           'EOFs computed on a dask array.')
-
     else:
         eofs, full_svals, pcs = svd(data[:].T, full_matrices=False)
         out_eofs = eofs[:, :num_eigs]
