@@ -217,9 +217,22 @@ class LIM(object):
 
         if np.any(q_evals < 0):
             num_neg = (q_evals < 0).sum()
-            logger.debug('Found {:d} modes with negative eigenvalues in'
-                         ' the noise covariance term, Q.'.format(num_neg))
-            raise ValueError('Negative eigenvalues of Q detected.')
+            num_left = len(q_evals) - num_neg
+            if num_neg > 5:
+                logger.debug('Found {:d} modes with negative eigenvalues in'
+                             ' the noise covariance term, Q.'.format(num_neg))
+                raise ValueError('More than 5 negative eigenvalues of Q '
+                                 'detected.  Consider further dimensional '
+                                 'reduction.')
+
+            else:
+                logger.info('Removing negative eigenvalues and rescaling {:d} '
+                            'remaining eigenvalues of Q.'.format(num_left))
+                pos_q_evals = q_evals[q_evals > 0]
+                scale_factor = q_evals.sum() / pos_q_evals.sum()
+
+                q_evals = q_evals[:-num_neg]*scale_factor
+                q_evects = q_evects[:, :-num_neg]
 
         return L, q_evals, q_evects
 
@@ -265,10 +278,6 @@ class LIM(object):
         fcast_out: ndarray-like
             LIM forecasts in a KxJxM^ matrix where K corresponds to each
             forecast time.
-        eofs: ndarray-like
-            EOFs for converting forecast output between EOF and physical
-            space.  Returned in an NxJ matrix.
-
         """
 
         if t0_data.ndim != 2:
