@@ -331,15 +331,18 @@ class LIM(object):
 
         state_1 = t0_data.T
 
+        if out_arr is not None:
+            out_arr[0] = t0_data
+
         for i in range(integration_steps):
             deterministic = (L @ state_1) * tdelta
             random = np.random.normal(size=(num_evals, nens))
-            stochastic = (Q_evec @ np.sqrt(Q_eval * tdelta)) * random
+            stochastic = Q_evec @ (np.sqrt(Q_eval * tdelta) * random)
             state_2 = state_1 + deterministic + stochastic
             state_mid = (state_1 + state_2) / 2
             state_1 = state_mid
-            if out_arr is not None and i % 2 == 0:
-                out_arr[i//2] = state_mid.T
+            if out_arr is not None and (i+1) % 2 == 0:
+                out_arr[(i//2) + 1] = state_mid.T
 
         return state_mid.T
 
