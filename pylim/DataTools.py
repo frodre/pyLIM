@@ -1170,7 +1170,7 @@ class BaseDataObject(object):
                     coords[key] = (i, coords[key])
 
             force_flat = kwargs.pop('force_flat', True)
-            return cls(data, dim_coords=coords, force_flat=force_flat,
+            return cls(data[:], dim_coords=coords, force_flat=force_flat,
                        time_units=times.units, time_cal=cal, coord_grids=grids,
                        cell_area=cell_area, irregular_grid=irregular_grid,
                        **kwargs)
