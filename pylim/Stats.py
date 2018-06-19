@@ -278,33 +278,42 @@ def calc_lac(fcast, obs):
     # Calculate means of data
     f_mean = fcast.mean(axis=0)
     o_mean = obs.mean(axis=0)
+    f_anom = fcast - f_mean
+    o_anom = obs - o_mean
 
-    # Calculate covariance between time series
-    cov = ne.evaluate('(fcast - f_mean) * (obs - o_mean)')
-    cov = cov.sum(axis=0)
+    # Calculate covariance between time series at each gridpoint
+    cov = (f_anom * o_anom).sum(axis=0)
 
-    # Calculate standarization terms
-    f_std = ne.evaluate('(fcast - f_mean)**2')
-    f_std = np.sqrt(f_std.sum(axis=0))
-    o_std = ne.evaluate('(obs - o_mean)**2')
-    o_std = np.sqrt(o_std.sum(axis=0))
+    # Calculate standardization terms
+    f_std = (f_anom**2).sum(axis=0)
+    o_std = (o_anom**2).sum(axis=0)
+    if is_dask_array(f_std):
+        f_std = da.sqrt(f_std)
+    else:
+        f_std = np.sqrt(f_std)
+
+    if is_dask_array(o_std):
+        o_std = da.sqrt(o_std)
+    else:
+        o_std = np.sqrt(o_std)
+
     std = f_std * o_std
+    lac = cov / std
 
-    return cov / std
+    return lac
 
 
 def calc_mse(fcast, obs):
-    sq_err = ne.evaluate('(obs - fcast)**2')
+    sq_err = (obs - fcast)**2
     mse = sq_err.mean(axis=0)
     return mse
 
 
 def calc_ce(fcast, obs):
 
-    sq_err = ne.evaluate('(obs - fcast)**2')
+    sq_err = (obs - fcast)**2
     obs_mean = obs.mean(axis=0)
-    obs_var = ne.evaluate('(obs - obs_mean)**2')
-
+    obs_var = (obs - obs_mean)**2
     ce = 1 - (sq_err.sum(axis=0) / obs_var.sum(axis=0))
     return ce
 
