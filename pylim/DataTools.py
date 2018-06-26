@@ -330,7 +330,7 @@ class BaseDataObject(object):
         if not np.all(full_valid):
             masked = True
             if self._leading_time:
-                valid_data = full_valid.sum() < self._time_shp[0]
+                valid_data = full_valid.sum(axis=0) == self._time_shp[0]
             else:
                 valid_data = full_valid
 
@@ -340,6 +340,7 @@ class BaseDataObject(object):
             logger.debug('No invalid values encountered.')
             masked = False
             valid_data = None
+
 
         return masked, valid_data
 
