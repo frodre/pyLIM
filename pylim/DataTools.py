@@ -59,6 +59,7 @@ class BaseDataObject(object):
     _RUNMEAN = 'running_mean'
     _ANOMALY = 'anomaly'
     _CLIMO = 'climo'
+    _STD = 'standardized'
     _EOFPROJ = 'eof_proj'
 
     @staticmethod
@@ -811,6 +812,40 @@ class BaseDataObject(object):
         self.data = self.area_weighted
         self._add_to_operation_history(self._curr_data_key, self._AWGHT)
         self._set_curr_data_key(self._AWGHT)
+        return self.data
+
+    def standardize_data(self, save=True):
+        """
+        Perform a standardization by the total grid variance.
+
+        Parameters
+        ----------
+        save: bool, optional
+            Whether or not to save data in a new databin. (Default is True)
+
+        Returns
+        -------
+        ndarray-like
+            Standardized data
+        """
+        if save and not self._save_none:
+            self.standardized = self._new_empty_databin(self.data.shape,
+                                                        self.data.dtype,
+                                                        self._STD)
+
+        grid_var = self.data.var(axis=0)
+        total_var = grid_var.sum()
+        grid_standardized = self.data / total_var
+
+        if is_dask_array(self.data):
+            da.store(grid_standardized, self.standardized)
+        else:
+            self.standardized[:] = grid_standardized
+
+        self.data = self.standardized
+        self._add_to_operation_history(self._curr_data_key, self._STD)
+        self._set_curr_data_key(self._STD)
+        return self.data
 
     def eof_proj_data(self, num_eofs=10, eof_in=None, save=True,
                       calc_on_key=None, proj_key=None):
