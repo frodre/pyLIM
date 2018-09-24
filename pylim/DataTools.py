@@ -149,6 +149,7 @@ class BaseDataObject(object):
         self.detrended = None
         self.area_weighted = None
         self.eof_proj = None
+        self.standardized = None
 
         # Match dimension coordinate vectors
         if dim_coords is not None:
@@ -807,9 +808,14 @@ class BaseDataObject(object):
             da.store(awgt, self.area_weighted)
         else:
             awgt = self.data
-            self.area_weighted[:] = ne.evaluate('awgt * scale')
+            result = ne.evaluate('awgt * scale')
 
-        self.data = self.area_weighted
+            if self.area_weighted is not None:
+                self.area_weighted[:] = result
+                self.data = self.area_weighted
+            else:
+                self.data = result
+
         self._add_to_operation_history(self._curr_data_key, self._AWGHT)
         self._set_curr_data_key(self._AWGHT)
         return self.data
@@ -840,9 +846,12 @@ class BaseDataObject(object):
         if is_dask_array(self.data):
             da.store(grid_standardized, self.standardized)
         else:
-            self.standardized[:] = grid_standardized
+            if self.standardized is not None:
+                self.standardized[:] = grid_standardized
+                self.data = self.standardized
+            else:
+                self.data = grid_standardized
 
-        self.data = self.standardized
         self._add_to_operation_history(self._curr_data_key, self._STD)
         self._set_curr_data_key(self._STD)
         return self.data
@@ -921,9 +930,13 @@ class BaseDataObject(object):
             proj = da.dot(self.data, self._eofs)
             da.store(proj, self.eof_proj)
         else:
-            self.eof_proj[:] = np.dot(self.data, self._eofs)
+            proj = np.dot(self.data, self._eofs)
+            if self.eof_proj is not None:
+                self.eof_proj[:] = proj
+                self.data = self.eof_proj
+            else:
+                self.data = proj
 
-        self.data = self.eof_proj
         self._add_to_operation_history(self._curr_data_key, self._EOFPROJ)
         self._set_curr_data_key(self._EOFPROJ)
 
