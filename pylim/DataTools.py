@@ -841,7 +841,7 @@ class BaseDataObject(object):
 
         grid_var = self.data.var(axis=0)
         total_var = grid_var.sum()
-        grid_standardized = self.data / total_var
+        grid_standardized = self.data / np.sqrt(total_var)
 
         if is_dask_array(self.data):
             da.store(grid_standardized, self.standardized)
