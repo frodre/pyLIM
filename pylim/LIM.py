@@ -6,7 +6,7 @@ Author: Andre Perkins
 """
 
 import numpy as np
-from numpy.linalg import pinv, eigvals, eig
+from numpy.linalg import inv, eigvals, eig
 from math import ceil
 import tables as tb
 import pickle as cpk
@@ -47,7 +47,7 @@ def _calc_m(x0, xt, tau=1):
     x0xt = np.dot(xt.T, x0)
 
     # Calculate the mapping term G_tau
-    G = np.dot(x0xt, pinv(x0x0))
+    G = np.dot(x0xt, inv(x0x0))
 
     # Calculate the forcing matrix to check that all modes are damped
     Geigs = eigvals(G)
@@ -104,7 +104,7 @@ class LIM(object):
     """
 
     def __init__(self, tau0_data, tau1_data=None, nelem_in_tau1=1,
-                 fit_noise=False, h5file=None):
+                 fit_noise=False, max_neg_Qeval=5, h5file=None):
         """
         Parameters
         ----------
@@ -122,6 +122,14 @@ class LIM(object):
             Number of time samples that span tau=1.  E.g. for monthly data when
             a forecast tau is equivalent to 1 year, nelem_in_tau should be 12.
             Used if tau1_data is not provided.
+        fit_noise: bool, optional
+            Whether to fit the noise term from calibration data. Used for
+            noise integration
+        max_neg_Qeval: int, optional
+            The maximum number of allowed negative eigenvalues in the Q matrix.
+            Negative eigenvalues suggest inclusion of too many modes, but a few
+            spurious ones are common.  I've been using a max of 5, but this
+            isn't based on an objective knowledge.
         h5file: HDF5_Object, Optional
             File object to store LIM output.  It will create a series of
             directories under the given group
@@ -157,7 +165,8 @@ class LIM(object):
         if fit_noise:
             [self.L,
              self.Q_evals,
-             self.Q_evects] = self._calc_Q(self.G_1, x0, tau=1)
+             self.Q_evects] = self._calc_Q(self.G_1, x0, tau=1,
+                                           max_neg_evals=max_neg_Qeval)
 
     @staticmethod
     def _calc_m(x0, xt, tau=1):
@@ -188,7 +197,7 @@ class LIM(object):
         x0xt = np.dot(xt.T, x0)
 
         # Calculate the mapping term G_tau
-        G = np.dot(x0xt, pinv(x0x0))
+        G = np.dot(x0xt, inv(x0x0))
 
         # Calculate the forcing matrix to check that all modes are damped
         Geigs = eigvals(G)
@@ -202,34 +211,34 @@ class LIM(object):
         return G
 
     @staticmethod
-    def _calc_Q(G, x0, tau=1):
-        C0 = x0.T @ x0 / x0.shape[0]  # State covariance
+    def _calc_Q(G, x0, tau=1, max_neg_evals=5):
+        C0 = x0.T @ x0 / (x0.shape[0] - 1)  # State covariance
         G_eval, G_evects = eig(G)
         L_evals = (1/tau) * np.log(G_eval)
-        L = G_evects @ np.diag(L_evals) @ pinv(G_evects)
-        L = L.real
+        L = G_evects @ np.diag(L_evals) @ inv(G_evects)
+        # L = L.real
         Q = -(L @ C0 + C0 @ L.T)  # Noise covariance
 
         q_evals, q_evects = eig(Q)
-        sort_idx = q_evals.argsort()
+        sort_idx = q_evals.real.argsort()
         q_evals = q_evals[sort_idx][::-1]
         q_evects = q_evects[:, sort_idx][:, ::-1]
 
-        if np.any(q_evals < 0):
-            num_neg = (q_evals < 0).sum()
+        if np.any(q_evals.real < 0):
+            num_neg = (q_evals.real < 0).sum()
             num_left = len(q_evals) - num_neg
-            if num_neg > 5:
+            if num_neg > max_neg_evals:
                 logger.debug('Found {:d} modes with negative eigenvalues in'
                              ' the noise covariance term, Q.'.format(num_neg))
-                raise ValueError('More than 5 negative eigenvalues of Q '
+                raise ValueError('More than {:d} negative eigenvalues of Q '
                                  'detected.  Consider further dimensional '
-                                 'reduction.')
+                                 'reduction.'.format(max_neg_evals))
 
             else:
                 logger.info('Removing negative eigenvalues and rescaling {:d} '
                             'remaining eigenvalues of Q.'.format(num_left))
-                pos_q_evals = q_evals[q_evals > 0]
-                scale_factor = q_evals.sum() / pos_q_evals.sum()
+                pos_q_evals = q_evals[q_evals.real > 0]
+                scale_factor = q_evals.real.sum() / pos_q_evals.real.sum()
 
                 q_evals = q_evals[:-num_neg]*scale_factor
                 q_evects = q_evects[:, :-num_neg]
@@ -344,7 +353,7 @@ class LIM(object):
             if out_arr is not None and (i+1) % 2 == 0:
                 out_arr[(i//2) + 1] = state_mid.T
 
-        return state_mid.T
+        return state_mid.T.real
 
 
 class ParamReducedLIM(LIM):
