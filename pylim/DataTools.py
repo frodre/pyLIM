@@ -140,6 +140,7 @@ class BaseDataObject(object):
         self._svals = None
         self._eof_stats = {}
         self._tb_file_args = None
+        self._std_scaling = None
 
         # Future possible data manipulation functionality
         self.anomaly = None
@@ -192,7 +193,7 @@ class BaseDataObject(object):
 
             if dim_lim <= 3:
                 logger.error('Valid data has more than 3 dimensions: '
-                             'ndim={}'.format())
+                             'ndim={}'.format(dim_lim))
                 raise ValueError('Valid data mask should not have more than 3 '
                                  'dimensions')
             elif dim_lim != len(self._spatial_shp):
@@ -841,12 +842,14 @@ class BaseDataObject(object):
 
         grid_var = self.data.var(axis=0)
         total_var = grid_var.sum()
-        grid_standardized = self.data / np.sqrt(total_var)
+        std_scaling = 1 / np.sqrt(total_var)
+        self._std_scaling = std_scaling
+        grid_standardized = self.data * std_scaling
 
         if is_dask_array(self.data):
             da.store(grid_standardized, self.standardized)
         else:
-            if self.standardized is not None:
+            if self.standardized is not None and save and not self._save_none:
                 self.standardized[:] = grid_standardized
                 self.data = self.standardized
             else:
