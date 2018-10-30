@@ -840,15 +840,19 @@ class BaseDataObject(object):
                                                         self.data.dtype,
                                                         self._STD)
 
-        grid_var = self.data.var(axis=0)
+        grid_var = self.data.var(axis=0, ddof=1)
         total_var = grid_var.sum()
         std_scaling = 1 / np.sqrt(total_var)
-        self._std_scaling = std_scaling
         grid_standardized = self.data * std_scaling
 
         if is_dask_array(self.data):
-            da.store(grid_standardized, self.standardized)
+            self._std_scaling = np.zeros(1)
+            da.store([grid_standardized, std_scaling],
+                     [self.standardized, self._std_scaling])
+            self._std_scaling = self._std_scaling[0]
         else:
+            self._std_scaling = std_scaling
+
             if self.standardized is not None and save and not self._save_none:
                 self.standardized[:] = grid_standardized
                 self.data = self.standardized
