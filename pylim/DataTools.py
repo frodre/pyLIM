@@ -821,7 +821,7 @@ class BaseDataObject(object):
         self._set_curr_data_key(self._AWGHT)
         return self.data
 
-    def standardize_data(self, save=True):
+    def standardize_data(self, std_factor=None, save=True):
         """
         Perform a standardization by the total grid variance.
 
@@ -839,17 +839,32 @@ class BaseDataObject(object):
             self.standardized = self._new_empty_databin(self.data.shape,
                                                         self.data.dtype,
                                                         self._STD)
+        if std_factor is None:
+            grid_var = self.data.var(axis=0, ddof=1)
+            total_var = grid_var.sum()
+            std_scaling = 1 / np.sqrt(total_var)
+        else:
+            std_scaling = std_factor
 
-        grid_var = self.data.var(axis=0, ddof=1)
-        total_var = grid_var.sum()
-        std_scaling = 1 / np.sqrt(total_var)
         grid_standardized = self.data * std_scaling
 
         if is_dask_array(self.data):
-            self._std_scaling = np.zeros(1)
-            da.store([grid_standardized, std_scaling],
-                     [self.standardized, self._std_scaling])
-            self._std_scaling = self._std_scaling[0]
+            if not is_dask_array(std_scaling):
+                inputs = [grid_standardized]
+                outputs = [self.standardized]
+                unpack_std_scaling = False
+            else:
+                inputs = [grid_standardized, std_scaling]
+                self._std_scaling = np.zeros(1)
+                outputs = [self.standardized, self._std_scaling]
+                unpack_std_scaling = True
+
+            da.store(inputs, outputs)
+
+            if unpack_std_scaling:
+                self._std_scaling = self._std_scaling[0]
+            else:
+                self._std_scaling = std_scaling
         else:
             self._std_scaling = std_scaling
 
@@ -936,6 +951,7 @@ class BaseDataObject(object):
         if is_dask_array(self.data):
             proj = da.dot(self.data, self._eofs)
             da.store(proj, self.eof_proj)
+            self.data = self.eof_proj
         else:
             proj = np.dot(self.data, self._eofs)
             if self.eof_proj is not None:
