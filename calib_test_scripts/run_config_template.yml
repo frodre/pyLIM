@@ -1,0 +1,106 @@
+## TODO: Use attrs as some form of feed in to convert this file into a useable
+##       configuration object.
+
+# Experiment name (used for directory creation)
+exp_name: ccsm4_past1000
+
+# Directory to store test output
+output_dir: /home/disk/katabatic2/wperkins/pyLIM_output
+
+# Directory for pre-processed LIM data
+pre_proc_dir: /home/disk/katabatic2/wperkins/nobackup/pyLIM_pre_proc
+
+# Directory for netCDF -> HDF5 conversion files (Dask compatibility)
+h5_dir: /home/disk/katabatic2/wperkins/nobackup/pyLIM_h5
+
+# Data key to calibrate LIM on (must be listed below)
+calib_on: ccsm4_past1000
+
+# Data key to test against
+fcast_against: ccsm4_past1000
+
+# Variables in netcdf files to use to create the LIM
+var_names: [tas, tos, zos]
+
+# time averaging
+# ann_std: Jan - Dec
+# ann_spr: Apr - Mar
+# ann_fall: Oct - Sep
+# none: No averaging
+avg_key: ann_spr
+
+# Number of elements in the average
+yr_len: 1
+
+# Use pre-averaged and saved files
+use_preproc_files: false
+
+# EOF reduction (used if more than one variable)
+neof_var: 400
+
+# LIM modes (eofs retained for LIM calibration)
+neof_multivar: 30
+
+## Tests and Figure Output ##
+
+# Mode plots
+num_eofs_to_plot: 10
+plot_eofs: False
+plot_multivar:eofs: False
+
+num_lim_modes_to_plot: 10
+plot_lim_modes: False
+
+num_noise_modes_to_plot: 10
+plot_noise_eofs: False
+
+# Perfect 1-yr forecast experiment
+do_perfect_fcast: False
+fcast_outputs:
+  tas: [glob_mean]
+  tos: [glob_mean, enso, pdo]
+plot_scalar_verif: False
+plot_spatial_verf: False
+
+# Ensemble noise integration 1-yr forecast
+do_ens_fcast: False
+do_hist_plot: True
+do_reliability_plot: True
+
+# Long integration
+do_long_integration: False
+integration_len_yr: 500
+integration_iters: 100
+
+
+
+## Dataset Information ##
+
+ccsm4_past100:
+  directory: /home/disk/katabatic/wperkins/data/lmr/data/model/ccsm4_past_millenium
+
+  atmos_vars: [tas]
+  ocn_vars: [zos, tos, ohc]
+  atmos_postfix: _sfc_Amon
+  ocn_postfix: _sfc_Omon
+
+  use_template: True
+  template_info:
+    template_str: '[vardef]'
+    filename: '[vardef]_CCSM4_past1000_085001-185012.nc'
+
+ccsm4_piControl:
+  directory: /home/disk/katabatic/wperkins/data/lmr/data/model/ccsm4_past_millenium
+
+  atmos_vars: [tas]
+  ocn_vars: [zos, tos, ohc]
+  atmos_postfix: _sfc_Amon
+  ocn_postfix: _sfc_Omon
+
+  use_template: True
+  template_info:
+    template_str: '[vardef]'
+    filename: '[vardef]_CCSM4_past1000_085001-185012.nc'
+
+  
+
