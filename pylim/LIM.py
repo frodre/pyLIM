@@ -163,10 +163,19 @@ class LIM(object):
         self.G_1 = self._calc_m(x0, x1, tau=1)
 
         if fit_noise:
+            q_res = self._calc_Q(self.G_1, x0, tau=1,
+                                 max_neg_evals=max_neg_Qeval)
             [self.L,
              self.Q_evals,
-             self.Q_evects] = self._calc_Q(self.G_1, x0, tau=1,
-                                           max_neg_evals=max_neg_Qeval)
+             self.Q_evects,
+             self.num_neg_Q,
+             self.neg_Q_rescale_factor] = q_res
+        else:
+            self.L = None
+            self.Q_evals = None
+            self.Q_evects = None
+            self.num_neg_Q = None
+            self.neg_Q_rescale_factor = None
 
     @staticmethod
     def _calc_m(x0, xt, tau=1):
@@ -223,9 +232,9 @@ class LIM(object):
         sort_idx = q_evals.real.argsort()
         q_evals = q_evals[sort_idx][::-1]
         q_evects = q_evects[:, sort_idx][:, ::-1]
+        num_neg = (q_evals.real < 0).sum()
 
-        if np.any(q_evals.real < 0):
-            num_neg = (q_evals.real < 0).sum()
+        if num_neg > 0:
             num_left = len(q_evals) - num_neg
             if num_neg > max_neg_evals:
                 logger.debug('Found {:d} modes with negative eigenvalues in'
@@ -239,11 +248,14 @@ class LIM(object):
                             'remaining eigenvalues of Q.'.format(num_left))
                 pos_q_evals = q_evals[q_evals.real > 0]
                 scale_factor = q_evals.real.sum() / pos_q_evals.real.sum()
+                logger.info('Q eigenvalue rescaling: {:1.2f}'.format(scale_factor))
 
                 q_evals = q_evals[:-num_neg]*scale_factor
                 q_evects = q_evects[:, :-num_neg]
+        else:
+            scale_factor = None
 
-        return L, q_evals, q_evects
+        return L, q_evals, q_evects, num_neg, scale_factor
 
     def save_precalib(self, filename):
 
