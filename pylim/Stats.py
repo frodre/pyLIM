@@ -29,7 +29,7 @@ def detrend_data(data, output_arr=None):
     """
 
     dummy_time = np.arange(data.shape[0])[:, None]
-    model = linear_model.LinearRegression(fit_intercept=False, n_jobs=-1)
+    model = linear_model.LinearRegression(fit_intercept=True, n_jobs=-1)
     model.fit(dummy_time, data)
 
     linfit = model.predict(dummy_time)
