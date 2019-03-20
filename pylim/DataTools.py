@@ -1873,6 +1873,11 @@ def netcdf_to_hdf5_container(infile, var_name, outfile, data_dir='/'):
                                  f.variables['lat'][:])
         lon = var_to_hdf5_carray(outf, data_dir, 'lon',
                                  f.variables['lon'][:])
+
+        # TODO: Unhardcode this
+        lat.attrs.index = 1
+        lon.attrs.index = 2
+
         times = f.variables['time']
         time_out = var_to_hdf5_carray(outf, data_dir, 'time',
                                       times[:])
