@@ -6,7 +6,7 @@ Author: Andre Perkins
 """
 
 import numpy as np
-from numpy.linalg import inv, eigvals, eig
+from numpy.linalg import inv, eigvals, eig, eigh
 from math import ceil
 import tables as tb
 import pickle as cpk
@@ -225,14 +225,22 @@ class LIM(object):
         G_eval, G_evects = eig(G)
         L_evals = (1/tau) * np.log(G_eval)
         L = G_evects @ np.diag(L_evals) @ inv(G_evects)
+        L = np.matrix(L)
         # L = L.real
-        Q = -(L @ C0 + C0 @ L.T)  # Noise covariance
+        Q = -(L @ C0 + C0 @ L.H)  # Noise covariance
 
-        q_evals, q_evects = eig(Q)
-        sort_idx = q_evals.real.argsort()
+        # Check if Q is Hermetian
+        is_adj = abs(Q - Q.H)
+        tol = 1e-10
+        if np.any(abs(is_adj) > tol):
+            raise ValueError('Determined Q is not Hermetian (complex '
+                             'conjugate transpose is equivalent.)')
+
+        q_evals, q_evects = eigh(Q)
+        sort_idx = q_evals.argsort()
         q_evals = q_evals[sort_idx][::-1]
         q_evects = q_evects[:, sort_idx][:, ::-1]
-        num_neg = (q_evals.real < 0).sum()
+        num_neg = (q_evals < 0).sum()
 
         if num_neg > 0:
             num_left = len(q_evals) - num_neg
@@ -246,14 +254,18 @@ class LIM(object):
             else:
                 logger.info('Removing negative eigenvalues and rescaling {:d} '
                             'remaining eigenvalues of Q.'.format(num_left))
-                pos_q_evals = q_evals[q_evals.real > 0]
-                scale_factor = q_evals.real.sum() / pos_q_evals.real.sum()
+                pos_q_evals = q_evals[q_evals > 0]
+                scale_factor = q_evals.sum() / pos_q_evals.sum()
                 logger.info('Q eigenvalue rescaling: {:1.2f}'.format(scale_factor))
 
                 q_evals = q_evals[:-num_neg]*scale_factor
                 q_evects = q_evects[:, :-num_neg]
         else:
             scale_factor = None
+
+        # Change back to arrays
+        L = np.array(L)
+        q_evects = np.array(q_evects)
 
         return L, q_evals, q_evects, num_neg, scale_factor
 
@@ -326,7 +338,7 @@ class LIM(object):
             fcast_out = np.zeros(fcast_out_shp)
 
         for i, tau in enumerate(fcast_leads):
-            g = self.G_1**tau
+            g = np.linalg.matrix_power(self.G_1, tau)
             xf = np.dot(g, t0_data.T)
             if use_h5:
                 fcast_out[i][:] = xf.T
