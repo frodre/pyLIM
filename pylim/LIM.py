@@ -47,7 +47,7 @@ def _calc_m(x0, xt, tau=1):
     x0xt = np.dot(xt.T, x0)
 
     # Calculate the mapping term G_tau
-    G = np.dot(x0xt, inv(x0x0))
+    G = np.dot(x0xt, pinv(x0x0))
 
     # Calculate the forcing matrix to check that all modes are damped
     Geigs = eigvals(G)
@@ -206,7 +206,7 @@ class LIM(object):
         x0xt = np.dot(xt.T, x0)
 
         # Calculate the mapping term G_tau
-        G = np.dot(x0xt, inv(x0x0))
+        G = np.dot(x0xt, pinv(x0x0))
 
         # Calculate the forcing matrix to check that all modes are damped
         Geigs = eigvals(G)
@@ -224,7 +224,7 @@ class LIM(object):
         C0 = x0.T @ x0 / (x0.shape[0] - 1)  # State covariance
         G_eval, G_evects = eig(G)
         L_evals = (1/tau) * np.log(G_eval)
-        L = G_evects @ np.diag(L_evals) @ inv(G_evects)
+        L = G_evects @ np.diag(L_evals) @ pinv(G_evects)
         L = np.matrix(L)
         # L = L.real
         Q = -(L @ C0 + C0 @ L.H)  # Noise covariance
@@ -348,7 +348,8 @@ class LIM(object):
         return fcast_out
 
     def noise_integration(self, t0_data, length, timesteps=720,
-                          out_arr=None, seed=None):
+                          out_arr=None, length_out_arr=None,
+                          seed=None):
 
         if seed is not None:
             np.random.seed(seed)
@@ -358,7 +359,7 @@ class LIM(object):
         Q_eval = self.Q_evals[:, None]
         Q_evec = self.Q_evects
         tdelta = 1/timesteps
-        integration_steps = int(2*timesteps * length)
+        integration_steps = int(timesteps * length)
         num_evals = Q_eval.shape[0]
         nens = t0_data.shape[0]
 
@@ -373,9 +374,13 @@ class LIM(object):
             stochastic = Q_evec @ (np.sqrt(Q_eval * tdelta) * random)
             state_2 = state_1 + deterministic + stochastic
             state_mid = (state_1 + state_2) / 2
-            state_1 = state_mid
-            if out_arr is not None and (i+1) % 2 == 0:
-                out_arr[(i//2) + 1] = state_mid.T
+            state_1 = state_2
+            if out_arr is not None:
+                out_arr[i + 1] = state_mid.T
+
+            if length_out_arr is not None and i % timesteps == 0 and i != 0:
+                len_out_arr_idx = i // timesteps
+                length_out_arr[len_out_arr_idx] = state_mid.T
 
         return state_mid.T.real
 
