@@ -6,7 +6,7 @@ Author: Andre Perkins
 """
 
 import numpy as np
-from numpy.linalg import inv, eigvals, eig, eigh
+from numpy.linalg import pinv, eigvals, eig, eigh
 from math import ceil
 import tables as tb
 import pickle as cpk
