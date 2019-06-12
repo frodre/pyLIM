@@ -5,15 +5,15 @@ A python-based linear inverse modeling suite.
 
 **pyLIM** is based on the linear inverse model (LIM) described by Penland & Sardeshmukh (1995).
 This package provides the machinery to both calibrate and forecast/integrate a LIM from the
-publications Perkins & Hakim ((2017)[http://dx.doi.org/10.5194/cp-13-421-2017], submitted-2019).
+publications Perkins & Hakim ([2017](http://dx.doi.org/10.5194/cp-13-421-2017), submitted-2019).
 
 The documentation and test updates are still in progress, but I hope to update those in the
 near future.
 
 ## Installation
 
-pyLIM requires python 3.6 and the following packages: `numpy, numexpr, netCDF4, dask, pytables,
-scipy, and scikit-learn.
+pyLIM requires Python 3.6+ and the following packages: `numpy, numexpr, netCDF4, dask, pytables,
+scipy, and scikit-learn`.
 
 To install pyLIM, `cd` into the package directory after downloading or cloning this repository.
 
@@ -40,15 +40,15 @@ Pre-processing from a netCDF file
     import pylim.DataTools as DT
 
     sst = DT.BaseDataObject.from_netcdf('sst_dat.nc', 'sst')
+    sst.calc_anomaly(12) # calculate monthly anomalies
     sst.time_average_resample('annual', 12) # annual average
-    sst.calc_anomaly(1)
-    sst.detrend_data()
-    sst.area_weight_data()
+    sst.detrend_data() # linearly detrend data
+    sst.area_weight_data(use_sqrt=True) 
     sst.eof_proj_data(num_eofs=10)
-    # sst.data is now ntimes x 10
+    # sst.data now has dimensions of ntimes x 10
 
-If data is too large for the system to hold in memory,  Hdf5DataObject stores intermediate data
-in a HDF5 container using pytables.  Use `DT.netcdf_tohdf5_container` to convert the netCDF to
+If the data is too large for the system to hold in memory,  `Hdf5DataObject` stores intermediate data
+in an HDF5 container using pytables.  Use `DT.netcdf_tohdf5_container` to convert the netCDF to
 HDF5, which I found to be more compatible with Dask.
 
     import tables as tb 
@@ -59,7 +59,7 @@ HDF5, which I found to be more compatible with Dask.
 ### Calibrating a LIM
 
 LIM calibration takes in data of shape `ntimes x nfeatures` and by default calibrates the LIM
-using a lag-1 covariance statistics.  If data are annually averaged, the base forecast unit
+using lag-1 covariance statistics.  If data are annually averaged, the base forecast unit
 would be 1-year.
 
     import pylim.LIM as LIM
@@ -77,9 +77,10 @@ Deterministic forecasts for different leads can be done using
 
     # 1- and 2-year forecasts initialized for every year of the first 10 from SSTs
     t0_data = sst.data[0:10]
-    fcast_out = lim.forecast(t0)data, [1, 2])
+    fcast_out = lim.forecast(t0_data, [1, 2])
 
-Noise integration for two years at ~3 hr timestep
+Noise integration for two years at ~3 hr timestep.  (`t0_data` can be considered a
+10-member ensemble for this integration)
    
     final_state = lim.noise_integration(t0_data, 2, timesteps=2880)    
 
