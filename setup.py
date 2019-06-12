@@ -22,10 +22,14 @@ setup(
     # Versions should comply with PEP440.  For a discussion on single-sourcing
     # the version across setup.py and the project code, see
     # https://packaging.python.org/en/latest/single_source_version.html
-    version='0.9.0',
+    version='0.9.1',
 
     description='A Python-based linear inverse modeling suite',
-    long_description='This will get longer...',
+    long_description=('Basic package to calibrate and forecast using linear
+                       inverse models.  Provides some data tools to handle
+                       experiments and calibration on large data.  Based on
+                       publications by Penland & Sardeshmukh 1995 and Newman
+                       2013.'),
 
     # The project's main homepage.
     url='https://github.com/frodre/pyLIM',
@@ -54,12 +58,12 @@ setup(
 
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.7',
+        'Programming Language :: Python :: 3'
+        'Programming Language :: Python :: 3.6',
     ],
 
     # What does your project relate to?
-    keywords='linear modeling paleoclimate',
+    keywords='linear inverse modeling; paleoclimate',
 
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().
