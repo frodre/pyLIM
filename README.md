@@ -1,5 +1,6 @@
 pyLIM
 =====
+[![DOI](https://zenodo.org/badge/21477157.svg)](https://zenodo.org/badge/latestdoi/21477157)
 
 A python-based linear inverse modeling suite.
 
