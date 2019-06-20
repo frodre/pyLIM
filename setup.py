@@ -25,11 +25,11 @@ setup(
     version='0.9.1',
 
     description='A Python-based linear inverse modeling suite',
-    long_description=('Basic package to calibrate and forecast using linear
+    long_description=('''Basic package to calibrate and forecast using linear
                        inverse models.  Provides some data tools to handle
                        experiments and calibration on large data.  Based on
                        publications by Penland & Sardeshmukh 1995 and Newman
-                       2013.'),
+                       2013.'''),
 
     # The project's main homepage.
     url='https://github.com/frodre/pyLIM',
